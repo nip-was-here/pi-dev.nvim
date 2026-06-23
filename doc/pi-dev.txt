@@ -1,0 +1,755 @@
+*pi-dev.nvim*               Neovim frontend for Pi.dev
+
+===============================================================================
+CONTENTS                                                        *pi-dev-contents*
+
+1. Overview                                      |pi-dev-overview|
+2. Requirements                                  |pi-dev-requirements|
+3. Installation and setup                         |pi-dev-setup|
+4. First use                                     |pi-dev-first-use|
+5. UI model                                      |pi-dev-ui-model|
+6. Commands and keymaps                           |pi-dev-commands|
+7. Input forms and completion                     |pi-dev-input|
+8. Sessions and runtimes                          |pi-dev-sessions|
+9. Tree, waiting, and subagent buffers             |pi-dev-navigation|
+10. Extension UI and compatibility                |pi-dev-extension-ui|
+11. MCP adapter                                  |pi-dev-mcp|
+12. Lua API                                      |pi-dev-lua-api|
+13. Configuration                                |pi-dev-configuration|
+14. Health and troubleshooting                    |pi-dev-health|
+15. Development checks                            |pi-dev-development|
+16. Known limitations                             |pi-dev-limitations|
+
+===============================================================================
+1. Overview                                                      *pi-dev-overview*
+
+pi-dev.nvim is a Lua-first, RPC-first Neovim frontend for Pi.dev. It starts Pi
+through `pi --mode rpc`, renders streamed Pi events into native Neovim buffers,
+and exposes Pi workflows through commands, keymaps, slash commands, and Lua
+functions.
+
+The plugin uses structured Pi RPC transport, not terminal scraping. One live
+RPC process plus its request state, stream buffer, metrics, draft input, and
+extension UI state is called a Pi RPC runtime. Runtimes are branch-bound so
+concurrent branch work does not overwrite the active branch UI.
+
+This is an early RPC-first MVP. Pi's RPC protocol and parts of this plugin UI
+may still change before the first major release.
+
+===============================================================================
+2. Requirements                                              *pi-dev-requirements*
+
+- Neovim >= 0.10.
+- Pi CLI installed and available as `pi`, or configured with `exec.bin`.
+- Pi RPC support through `pi --mode rpc`.
+- Optional: render-markdown.nvim for richer Markdown rendering.
+
+Pi CLI installation examples: >sh
+  npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+  curl -fsSL https://pi.dev/install.sh | sh
+<
+
+Then run `pi` in a terminal and authenticate, for example with `/login`, or
+configure a supported provider API key. Confirm RPC mode starts: >sh
+  pi --mode rpc
+<
+
+===============================================================================
+3. Installation and setup                                          *pi-dev-setup*
+
+Minimal lazy.nvim spec: >lua
+  'nip-was-here/pi-dev.nvim'
+<
+
+No explicit setup call is required for defaults. The plugin loader calls
+`require('pi-dev').setup(vim.g.pi_dev_nvim or {})` once.
+
+To customize options with lazy.nvim: >lua
+  {
+    'nip-was-here/pi-dev.nvim',
+    opts = {
+      exec = { bin = 'pi' },
+      keymaps = {
+        prefix = '<leader>a',
+      },
+    },
+  }
+<
+
+If your plugin manager does not call setup with opts, set `vim.g.pi_dev_nvim`
+before loading the plugin: >lua
+  vim.g.pi_dev_nvim = {
+    exec = { bin = 'pi' },
+  }
+<
+
+Manual setup is also supported and idempotent: >lua
+  require('pi-dev').setup({ exec = { bin = 'pi' } })
+<
+
+===============================================================================
+4. First use                                                  *pi-dev-first-use*
+
+1. Install the plugin and make sure `pi` is available.
+2. Run `:checkhealth pi-dev`.
+3. Open the Pi panel with `:PiDev` or `<leader>ag`.
+4. Type a prompt in the lower Pi input window.
+5. Submit with insert-mode `<C-s>` or normal-mode `<CR>`.
+
+When Pi is idle, submitted text sends a normal prompt. When Pi is already
+processing, submitted text is routed as steering input. Use `<C-c>` in a Pi
+window or `:PiDevAbort` to request cancellation of the active operation without
+locally discarding visible or queued extension interactions.
+
+===============================================================================
+5. UI model                                                    *pi-dev-ui-model*
+
+Pi panel ~
+  The plugin-owned native Neovim layout. The default layout is a right-side
+  panel; a bottom layout is configurable. Hiding the panel does not stop active
+  RPC runtimes. `<C-W>=` restores the configured right-panel width; ordinary
+  manual resizing is preserved.
+
+Output surface ~
+  The read-oriented buffer for conversation, Pi responses, restored history,
+  tool output, service notices, permission objects, errors, large tree/waiting
+  navigators, and focused subagent buffers.
+
+Input surface ~
+  The editable plain-text buffer for user prompts. It is branch-runtime local:
+  drafts are saved before branch switches and restored when returning to that
+  runtime. It becomes read-only while a focused subagent buffer is open.
+
+Interaction surface ~
+  The transient UI for permission decisions, selects, input/editor requests,
+  model controls, session controls, tree navigation, and waiting navigation.
+  Large tree/waiting navigators render in the output surface; permission/text
+  interactions render in the lower pane.
+
+Status separator ~
+  Non-focusable chrome between output and lower surfaces. It shows compact
+  operational state and metrics such as cost, tokens, context, and model. State
+  labels include `run`, `idle`, `wait`, `load`, `compact`, `retry`, `queue`,
+  `err`, and `off`. It is not the Neovim statusline.
+
+Rendering and folds ~
+  The output buffer uses Markdown filetype by default. Tool, permission, and
+  thinking details are rendered as foldable blocks. The headings stay visible;
+  folds hide only detail bodies. Small details remain open, and longer details
+  auto-close according to the configured thresholds.
+
+===============================================================================
+6. Commands and keymaps                                      *pi-dev-commands*
+
+                                                        *:PiDev*
+:PiDev                  Toggle the Pi panel and start RPC on first use.
+
+                                                        *:PiDevOpen*
+:PiDevOpen              Start Pi RPC and show the Pi panel.
+
+                                                        *:PiDevHide*
+:PiDevHide              Hide Pi windows without stopping active runtimes.
+
+                                                        *:PiDevPrompt*
+:PiDevPrompt {prompt}   Send a prompt to Pi RPC through command args.
+
+                                                        *:PiDevFocus*
+:PiDevFocus             Focus the lower Pi input buffer.
+
+                                                        *:PiDevAbort*
+:PiDevAbort             Cancel current Pi operation without stopping the RPC
+                        runtime when possible.
+
+                                                        *:PiDevStopRpc*
+:PiDevStopRpc           Kill the Pi RPC process attached to the current branch.
+                        This explicit stop does not ask for confirmation. It
+                        closes extension prompts owned by that runtime and
+                        discards volatile runtime-local state.
+
+                                                        *:PiDevNextRpc*
+:PiDevNextRpc           Cycle to the next already-running branch runtime.
+
+                                                        *:PiDevPrevRpc*
+:PiDevPrevRpc           Cycle to the previous already-running branch runtime.
+
+                                                        *:PiDevName*
+:PiDevName [name]       Set the root Pi session display name.
+
+                                                        *:PiDevSession*
+:PiDevSession           Show current Pi session and runtime details.
+
+                                                        *:PiDevCompact*
+:PiDevCompact [text]    Compact current Pi context with optional instructions.
+
+                                                        *:PiDevExport*
+:PiDevExport [path]     Export current Pi session to HTML. When omitted,
+                        pi-dev.nvim prompts for the output path.
+
+                                                        *:PiDevHotkeys*
+:PiDevHotkeys           Show plugin commands and configured hotkeys.
+
+                                                        *:PiDevQuit*
+:PiDevQuit              Alias for killing the current branch RPC process.
+
+                                                        *:PiDevNewSession*
+:PiDevNewSession        Start a new Pi session and reset old-root runtimes.
+
+                                                        *:PiDevResume*
+:PiDevResume            Pick a current-directory Pi session.
+
+                                                        *:PiDevModel*
+:PiDevModel             Pick a Pi model. Model changes are unavailable during
+                        active streaming/tool work; try again after the turn.
+
+                                                        *:PiDevReload*
+:PiDevReload            Restart the active runtime and reload current session
+                        context. It asks for confirmation only when the active
+                        runtime has volatile runtime-local state.
+
+                                                        *:PiDevTree*
+:PiDevTree              Open session tree/fork navigation.
+
+                                                        *:PiDevWaiting*
+:PiDevWaiting           Open waiting-input branch navigation.
+
+                                                        *:PiDevSubagentOpen*
+:PiDevSubagentOpen      Open the focused subagent buffer for the subagent block
+                        under the cursor.
+
+                                                        *:PiDevSubagentParent*
+:PiDevSubagentParent    Return from a focused subagent buffer to its parent
+                        agent buffer.
+
+Default normal-mode mappings use `<leader>a`:
+
+  `<leader>ag`       Toggle UI
+  `<leader>ap`       Prompt via input()
+  `<leader>ai`       Focus Pi input
+  `<leader>aq`       Hide UI
+  `<leader>ac`       Cancel current operation
+  `<leader>aK`       Kill current branch RPC process
+  `<leader>aa`       Cycle to next running branch RPC
+  `<leader>aA`       Cycle to previous running branch RPC
+  `<leader>an`       New session
+  `<leader>ar`       Resume session
+  `<leader>am`       Pick model
+  `<leader>aR`       Reload RPC/session
+  `<leader>at`       Tree navigation
+  `<leader>aw`       Waiting-input navigation
+  `<leader>a]`       Open focused subagent buffer
+  `<leader>a[`       Return to parent buffer
+
+Only `<leader>ag` remains mapped while the Pi panel is closed. The other
+`<leader>a*` mappings are installed when the panel opens and removed again when
+it is hidden or closed.
+
+===============================================================================
+7. Input forms and completion                                  *pi-dev-input*
+
+Slash commands ~                                      *pi-dev-slash-commands*
+  Local integration slash commands include:
+
+    /name [name]        Set the root Pi session display name.
+    /session            Show current session and runtime details.
+    /compact [text]     Compact current Pi context.
+    /export [path]      Export current Pi session to HTML; prompts when omitted.
+    /hotkeys            Show plugin commands and configured hotkeys.
+    /model              Pick a Pi model when idle or waiting.
+    /resume             Pick a current-directory session.
+    /reload             Restart active RPC runtime and reload session context.
+    /stop-rpc, /stop    Kill the current branch RPC process.
+    /quit               Alias for killing the current branch RPC process.
+    /next-rpc           Cycle to the next running branch runtime.
+    /cycle-rpc          Alias for /next-rpc.
+    /prev-rpc           Cycle to the previous running branch runtime.
+    /previous-rpc       Alias for /prev-rpc.
+    /tree               Navigate/fork from the root session tree.
+    /waiting            Show branches currently waiting for input.
+    /new                Create a new Pi session and reset old-root runtimes.
+    /subagent-open      Open the focused subagent buffer under the cursor.
+    /subagent-parent    Return to the parent buffer.
+    /mcp, /mcp status   Show native MCP adapter status.
+    /mcp on {server}    Enable a configured MCP server as direct tools.
+    /mcp off [server]   Disable one MCP server, or all when omitted.
+    /mcp-auth {server}  Start MCP OAuth through pi-mcp-adapter.
+
+Shell forms ~
+  `!command` runs a shell command through Pi RPC and adds output to Pi context.
+  `!!command` runs a local shell command in Neovim and only renders the output;
+  it is not sent to Pi context.
+
+Completion ~                                             *pi-dev-completion*
+  The lower input buffer provides completion for:
+
+  - Slash commands, including Pi-reported commands from RPC `get_commands` plus
+    local integration commands.
+  - `/skill:` commands after Pi reports loaded skills; a fallback `/skill:` item
+    appears before discovery.
+  - `@file` references after whitespace, using cwd path completion.
+  - `/export` output paths.
+  - MCP server names after `/mcp on`, `/mcp off`, and `/mcp-auth`.
+  - `!` and `!!` shell forms: executable names from `$PATH` for the first token,
+    then cwd paths for later/path-like tokens.
+
+History recall ~
+  In normal mode, when the input buffer is empty, `<PageUp>` and `<PageDown>`
+  recall previous user prompts from the currently rendered branch lineage.
+
+MCP directives ~
+  Multiline prompts are scanned for lowercase beginning-of-line `/mcp on ...`
+  and `/mcp off ...` lines before they are sent. Directive lines are removed
+  from the prompt; the remaining text is sent only after the MCP runtime reload
+  succeeds.
+
+===============================================================================
+8. Sessions and runtimes                                    *pi-dev-sessions*
+
+Current-directory sessions ~
+  On first open, pi-dev.nvim loads the newest Pi JSONL session whose header
+  `cwd` matches Neovim's effective cwd. If none exists, it opens an empty chat
+  surface; the first user prompt creates the new Pi session through the normal
+  prompt path. Restored history is rendered in paced chunks; Pi keeps the full
+  live context internally.
+
+DirChanged behavior ~
+  When Neovim's cwd changes and Pi has no volatile runtime-local state,
+  pi-dev.nvim stops old idle runtimes and restores that cwd's newest session.
+  If the new cwd has no matching session, no stop warning is shown and the first
+  user prompt creates the new Pi session. If active work, live/respondable
+  interaction state, or unsent runtime-local drafts exist, automatic reload is
+  deferred with a warning instead of silently stopping runtimes.
+
+Branch-bound runtimes ~
+  A branch-bound runtime is one `pi --mode rpc` process attached to one Pi
+  session branch. Inactive branch events update their runtime state but cannot
+  overwrite the active output, input, interaction, or status separator surfaces.
+
+Runtime pool ~
+  Branch navigation reuses an existing attached runtime when possible, or starts
+  a new runtime up to `rpc.pool_size` (default and cap: 8). Background idle
+  runtimes with no volatile runtime-local state stop after
+  `rpc.idle_timeout_ms` (default: 3 minutes) once another runtime exists. A
+  sole idle runtime remains attached.
+
+Abort, stop, reload ~
+  Abort requests cancellation while keeping the active runtime attached when
+  possible. Stop/quit terminates the current branch runtime and discards its
+  volatile runtime-local state. Reload restarts only the active runtime and asks
+  for confirmation only when that runtime has volatile state; inactive branch
+  runtimes remain attached.
+
+Model changes ~
+  Model picking is allowed when the active runtime is idle or waiting for input.
+  During active streaming/tool work it is rejected with a warning.
+
+Destructive root switches ~
+  Switching/resuming to a different root session tree resets old-root runtimes.
+  If any connected runtime has active work, live/respondable interaction state,
+  or unsent runtime-local drafts, pi-dev.nvim asks for confirmation before that
+  reset. Confirming stops affected runtimes, discards their volatile state, and
+  starts one fresh runtime for the selected session. Moving inside the same root
+  session tree is non-destructive.
+
+===============================================================================
+9. Tree, waiting, and subagent buffers                    *pi-dev-navigation*
+
+Resume ~
+  `/resume` and `:PiDevResume` open a current-directory root-session picker in
+  the output surface. It shows only root session trees, sorted by most recent
+  interaction. Each root row shows the branch count followed by
+  `Last: <last interaction time>`; internal helper runs are hidden. Choosing a
+  root resumes the newest branch in that root tree. Use `j`/`k`, search, or
+  `gg`/`G` to focus selectable rows before Enter.
+
+Tree navigation ~
+  `/tree` and `:PiDevTree` show the root session tree in the output surface as a
+  plain-text interaction. User-message rows can be selected for Pi RPC fork
+  semantics, so the selected prompt can be edited. Response rows
+  navigate to that response and do not fill Pi input.
+
+  Tree rows use git-log-like branch markers and timestamps. Sibling branches at
+  every fork point are ordered by most recent visible interaction. Branches and
+  sub-branches are foldable and open by default, so large trees can be collapsed
+  to a branch's top message. Pressing Enter on a collapsed branch row navigates
+  to the folded branch's last visible step. Runtime badges such as `[run]`,
+  `[wait]`, and `[idle]` show attached branch state.
+
+  When tree selection creates or switches to a branch session file,
+  pi-dev.nvim assigns that file a Pi session display name from the branch's
+  first user message after the branch point once that message exists. This makes
+  branch sessions recognizable later in Pi TUI `/resume`.
+
+  Selecting or cycling to a non-waiting branch uses the `tree.branch_render.*`
+  display profile by default, so large tool-heavy branches open quickly while Pi
+  keeps full branch context internally. Branch-render message and text limits are
+  caps; lower `session_render.*` limits still win.
+
+Waiting navigation ~
+  `/waiting` and `:PiDevWaiting` keep only waiting rows plus ancestor tree rows
+  needed to understand their branch position. Only rows whose attached runtime
+  has live/respondable waiting interaction state are selectable: a pending
+  extension UI request, saved visible extension interaction, or runtime-local
+  queued interaction. Restored JSONL-only permission records are history
+  artifacts, not actionable waiting rows. Choosing a waiting row switches to
+  that branch and reopens its pending/current/queued interaction.
+
+Focused subagent buffers ~
+  Subagent tool output in the parent chat keeps only each child run's main
+  information. To inspect a child result, put the cursor anywhere in that child
+  subagent block and run `:PiDevSubagentOpen`, `/subagent-open`, or
+  `<leader>a]`. The output surface switches to an isolated buffer titled like
+  `Pi chat subagent (deep N): ...`.
+
+  Nested subagents can be opened from inside a focused subagent buffer with the
+  same command; depth increases in the title. Return one level with
+  `:PiDevSubagentParent`, `/subagent-parent`, or `<leader>a[`. Focused subagent
+  buffers are not included in runtime cycling, tree navigation, or waiting
+  branch lists. Branch-runtime switches close focused subagent buffers to keep
+  runtime views isolated.
+
+  If a permission request arrives while a subagent is running, the parent/root
+  chat mirrors the permission request block under the corresponding subagent
+  header. This keeps the root branch visibly waiting and lets the decision be
+  answered from the lower interaction pane.
+
+===============================================================================
+10. Extension UI and compatibility                    *pi-dev-extension-ui*
+
+Generic extension UI ~
+  Pi RPC extension UI requests are rendered natively when possible. Supported
+  generic methods include:
+
+  - `notify`
+  - `setStatus`
+  - `setWidget`
+  - `setTitle`
+  - `confirm`
+  - `select`
+  - `input`
+  - `editor`
+  - `set_editor_text`
+
+  Generic input/editor requests use the lower interaction surface. Normal Pi
+  input drafts and extension editor text are preserved separately per
+  branch-bound runtime, even when another permission/select/tree/waiting overlay
+  is visible. Active editor edits are snapshotted when switching away from a
+  runtime and restored when returning.
+
+  Short input requests submit with normal `<CR>` or `<C-s>`. Editor requests are
+  multiline and submit only with explicit `<C-s>` so normal-mode `<CR>` does not
+  accidentally send an editor response. Extension `set_editor_text` updates the
+  active editor interaction when one is open; otherwise it stores editor text on
+  the active runtime for the next editor interaction. It never overwrites normal
+  Pi input.
+
+Compatibility layers ~
+  pi-dev.nvim provides plugin-specific native compatibility for:
+
+  - `pi-subagents`: compact parent-chat summaries, focused subagent buffers,
+    nested subagent titles, and parent/root permission mirroring for subagent
+    permission requests.
+  - `@gotgenes/pi-permission-system`: native permission prompts, folded
+    permission details in the output surface, exact option-value responses, and
+    denial-reason follow-up prompts.
+  - `pi-mcp-adapter`: native `/mcp` status, context-local direct-tool toggles,
+    and RPC-mode OAuth URL rendering for `/mcp-auth`.
+
+  Other Pi plugins that use the generic Pi RPC extension UI protocol may work
+  through generic native handling, but plugin-specific behavior is only
+  available for the compatibility layers listed here.
+
+Permission prompts ~
+  The permission compatibility layer is enabled by default. It detects
+  permission selects, renders concise choices in the interaction surface,
+  mirrors request context and elapsed wait time into the output surface as a
+  folded permission object, and returns exact original option values to Pi. Tool
+  duration labels exclude time spent waiting for the permission answer.
+
+  Permission prompts from inactive branch runtimes are retained on those
+  runtimes and shown when the user returns to the branch. Permission prompts
+  that arrive behind an active `/tree` or `/waiting` surface are queued on the
+  active runtime until that runtime's current interaction closes.
+
+Disable permission compatibility: >lua
+  vim.g.pi_dev_nvim = {
+    compat = {
+      pi_permission_system = { enable = false },
+    },
+  }
+<
+
+===============================================================================
+11. MCP adapter                                                  *pi-dev-mcp*
+
+The native MCP compatibility layer is enabled by default for pi-mcp-adapter. It
+provides native `/mcp` status and context-local direct-tool toggles without
+mutating shared MCP configuration files.
+
+Config discovery order:
+
+  1. ~/.config/mcp/mcp.json
+  2. <Pi agent dir>/mcp.json
+  3. .mcp.json
+  4. .pi/mcp.json
+
+The Pi agent dir is `PI_CODING_AGENT_DIR` when set, otherwise `~/.pi/agent`.
+Configured imports from known client config files may also be read when present.
+
+Commands:
+
+  /mcp, /mcp status   Render configured servers and effective on/off state.
+  /mcp on {server}    Enable a configured server as direct tools.
+  /mcp off [server]   Disable one configured server, or all when omitted.
+  /mcp-auth {server}  Run adapter OAuth setup for a server.
+
+The status output is a compact Markdown table with MCP name, effective status,
+and auth status. `on` means direct tools are loaded, `lazy` means the server is
+configured but not direct, and `off` means disabled in MCP config. Auth status is
+a best-effort local check: `ok` means a current or legacy pi-mcp-adapter OAuth
+token file exists and is not expired, `missing` means configured bearer/OAuth
+credentials were not found, `expired` means the stored OAuth token is expired,
+`invalid` means the token file could not be recognized, `bearer` means a bearer
+token is configured, `auto` means an HTTP server may auto-detect auth, and `-`
+means no auth signal is known.
+
+Prompts are scanned line-by-line for beginning-of-line `/mcp on ...` and
+`/mcp off ...` directives before being sent to Pi. Server-name lookup is
+case-insensitive and accepts a unique close server-name match; `/mcp`, `on`,
+`off`, `status`, and `/mcp-auth` command words are case-insensitive. If context
+changes while idle or waiting, pi-dev.nvim reloads the active runtime with `MCP_DIRECT_TOOLS`
+and restores the current branch before sending the remaining prompt. If reload
+is cancelled, the MCP override is rolled back and the prompt is not sent. During
+active work, MCP context changes are deferred and the prompt is not sent.
+
+`/mcp-auth {server}` is still executed by pi-mcp-adapter, but pi-dev.nvim
+canonicalizes the configured server name before forwarding the command. In RPC
+mode the adapter can print a browser authorization URL outside JSONL while it waits for
+the localhost callback. pi-dev.nvim recognizes that output, renders the URL in
+the output surface, and shows the matching `mcp({ action: "auth-complete", ... })`
+manual completion shape instead of treating the URL as a protocol error.
+
+Disable MCP compatibility: >lua
+  vim.g.pi_dev_nvim = {
+    compat = {
+      mcp_adapter = { enable = false },
+    },
+  }
+<
+
+===============================================================================
+12. Lua API                                                  *pi-dev-lua-api*
+
+The stable Lua entrypoint is intentionally small: `require('pi-dev')`,
+`setup(opts)`, and documented top-level convenience methods. The broader
+`require('pi-dev').api` table is available for advanced integration and tests,
+but it is not a stability promise until specific functions are documented as
+public.
+
+Example: >lua
+  local pi_dev = require('pi-dev')
+  pi_dev.setup({})
+  pi_dev.toggle()
+  pi_dev.prompt('Explain this buffer')
+<
+
+Documented top-level methods:
+
+  setup(opts)                         Configure plugin, commands, keymaps.
+  start()                             Start RPC and show the Pi panel.
+  toggle()                            Toggle the Pi panel.
+  prompt(message, opts, callback)     Send a prompt.
+  hide()                              Hide the Pi panel.
+  abort(callback)                     Request cancellation.
+  stop_current_rpc()                  Stop current branch runtime.
+  next_rpc()                          Cycle to next branch runtime.
+  previous_rpc()                      Cycle to previous branch runtime.
+  new_session(callback)               Create a new session.
+  resume()                            Open current-directory session picker.
+  model_picker()                      Pick a model.
+  reload(callback)                    Reload active runtime/session context.
+  tree()                              Open tree navigation.
+  waiting()                           Open waiting navigation.
+  open_subagent_buffer()              Open focused subagent buffer.
+  return_to_parent_agent_buffer()     Return from focused subagent buffer.
+
+===============================================================================
+13. Configuration                                         *pi-dev-configuration*
+
+Top-level options:
+
+  cwd                                default: nil
+                                      Working directory for Pi RPC and
+                                      current-directory session matching.
+  env                                default: nil
+                                      Extra environment variables for Pi RPC.
+  session_root                       default: '~/.pi/agent/sessions'
+                                      Directory scanned for Pi JSONL sessions.
+  auto_resume_last_session           default: true
+                                      Restore/create a current-directory session
+                                      on first open and cwd reload.
+
+Session rendering:
+
+  session_render.max_messages        default: 100
+                                      0 or false renders all history.
+  session_render.include_tool_results default: true
+                                      Include restored tool result messages in
+                                      session renders.
+  session_render.max_text_chars      default: false
+                                      false or 0 renders full message text;
+                                      positive numbers truncate restored text.
+  session_render.chunk_size          default: 100
+  session_render.chunk_delay_ms      default: 0
+  session_render.chunk_budget_ms     default: 8
+                                      Pacing controls for restored history.
+
+Tree navigation:
+
+  tree.assistant_responses           default: 'last_per_user'
+                                      values: 'last_per_user', 'all'
+  tree.branch_render.max_messages    default: 30
+  tree.branch_render.include_tool_results default: false
+  tree.branch_render.max_text_chars  default: 1200
+                                      Display profile used for fast branch
+                                      navigation from tree/runtime switching.
+
+Execution:
+
+  exec.bin                           default: 'pi'
+                                      Pi executable name/path, or argv table
+                                      when a wrapper command is needed.
+  exec.args                          default: { '--mode', 'rpc' }
+                                      Arguments used to start Pi RPC mode.
+
+RPC:
+
+  rpc.restart_on_exit                default: false
+  rpc.pool_size                      default: 8
+                                      Maximum branch-bound runtimes; values
+                                      above 8 are capped.
+  rpc.idle_timeout_ms                default: 180000
+                                      Background idle runtime stop delay for
+                                      runtimes without volatile state once
+                                      another runtime exists; 0 disables.
+
+Compatibility layers:
+
+  compat                             default: table
+                                      Set to false to disable all documented
+                                      compatibility layers.
+  compat.pi_permission_system.enable default: true
+  compat.mcp_adapter.enable          default: true
+
+UI:
+
+  ui.position                        default: 'right'
+                                      values: 'right', 'bottom'
+  ui.width                           default: 100
+                                      Initial right-panel width; manual resizes
+                                      are preserved.
+  ui.height                          default: 0.35
+                                      Bottom-panel height ratio/size.
+  ui.input_height                    default: 10
+                                      Initial lower-pane height; manual resizes
+                                      are preserved.
+  ui.output_filetype                 default: 'markdown'
+  ui.input_filetype                  default: 'text'
+  ui.title                           default: 'Pi.dev'
+  ui.session_title_branch_fraction   default: 0.6
+                                      Fraction of output title width reserved
+                                      for branch/session title text.
+  ui.status_separator.enable         default: true
+                                      Preferred status-separator toggle.
+  ui.statusline.enable               default: true
+                                      Legacy alias for the status separator.
+  ui.render.fold_tool_output_over    default: 20
+                                      Tool details are always foldable; details
+                                      auto-close only above this rendered-line
+                                      threshold.
+  ui.render.show_timestamps          default: true
+  ui.render.show_thinking            default: true
+                                      Thinking folds stay open up to 8 rendered
+                                      detail lines and auto-close above that.
+  ui.render.show_tool_arguments      default: true
+  ui.render.show_stderr              default: true
+
+Keymaps and commands:
+
+  keymaps.enable                     default: true
+  keymaps.prefix                     default: '<leader>a'
+  keymaps.mappings.toggle            default: 'g'
+  keymaps.mappings.prompt            default: 'p'
+  keymaps.mappings.focus_input       default: 'i'
+  keymaps.mappings.hide              default: 'q'
+  keymaps.mappings.abort             default: 'c'
+  keymaps.mappings.stop_current_rpc  default: 'K'
+  keymaps.mappings.cycle_rpc         default: 'a'
+  keymaps.mappings.cycle_rpc_reverse default: 'A'
+  keymaps.mappings.new_session       default: 'n'
+  keymaps.mappings.resume            default: 'r'
+  keymaps.mappings.reload            default: 'R'
+  keymaps.mappings.model             default: 'm'
+  keymaps.mappings.tree              default: 't'
+  keymaps.mappings.waiting           default: 'w'
+  keymaps.mappings.subagent_open     default: ']'
+  keymaps.mappings.subagent_parent   default: '['
+  commands.enable                    default: true
+
+Deprecated option names `executable`, `args`, and `rpc.args` are rejected with
+rename messages. Use `exec.bin` and `exec.args` instead.
+
+===============================================================================
+14. Health and troubleshooting                              *pi-dev-health*
+
+Run: >vim
+  :checkhealth pi-dev
+<
+
+The health provider checks:
+
+- Neovim version.
+- Pi executable availability.
+- RPC command shape.
+- Whether the Pi RPC command can be spawned and stays running.
+- Session root existence.
+- Optional render-markdown.nvim availability.
+
+Useful diagnostic slash commands:
+
+  /session   Show current session, root session, runtime, model, metrics.
+  /hotkeys   Show plugin commands and configured hotkeys.
+  /reload    Restart the active runtime and reload current branch/session
+             context.
+  /waiting   Show branches with live/respondable interaction state.
+
+If output appears stale, first inspect `/session`. If the active runtime is idle
+or waiting and a restart is safe, use `/reload`. If a branch appears to be
+waiting elsewhere, use `/waiting` or cycle attached runtimes with `/next-rpc` and
+`/prev-rpc`.
+
+===============================================================================
+15. Development checks                                  *pi-dev-development*
+
+Project checks are wired into pre-commit. With the hook installed, `git commit`
+runs the public regression suite under tests/ plus repository formatting and
+documentation checks automatically.
+
+The public regression suite entrypoint is `tests/run.sh`. Shell tests live under
+`tests/shell/`, test support helpers under `tests/support/`, and per-test timeout
+calibration in `tests/shell-timeouts.tsv`.
+
+===============================================================================
+16. Known limitations                                      *pi-dev-limitations*
+
+- The plugin is still an RPC-first MVP; Pi RPC protocol changes may require
+  plugin updates.
+- Custom extension TUIs beyond the generic extension UI protocol are not fully
+  native yet.
+- Very large histories and root session trees are paced and limited for display,
+  even though Pi keeps full context internally.
+- The local runtime pool is intentionally capped at 8 branch-bound runtimes.
+- Release artifacts are GitHub releases/tags; there is no package-registry
+  manifest in this repository.
+
+===============================================================================
+ vim:tw=78:ts=8:ft=help:norl:

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests and pre-commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install shell test tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            adr-tools \
+            coreutils \
+            findutils \
+            gawk \
+            grep \
+            sed
+
+      - name: Set up Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+          cache: pip
+          cache-dependency-path: .github/requirements-ci.txt
+
+      - name: Install pre-commit
+        run: python -m pip install --upgrade -r .github/requirements-ci.txt
+
+      - name: Verify CI tooling
+        run: |
+          bash --version
+          timeout --version
+          awk --version
+          sed --version
+          grep --version
+          find --version
+          sort --version
+          nvim --version
+          python --version
+          pre-commit --version
+          adr help list >/dev/null
+
+      - name: Run pre-commit
+        env:
+          PIDEV_TEST_TIMEOUT_SCALE: '3'
+        run: pre-commit run --all-files
