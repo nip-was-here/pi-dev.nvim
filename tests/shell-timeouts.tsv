@@ -110,6 +110,7 @@ tree/assistant_navigation.sh	1.0s
 tree/auto_fold_leaf_branches.sh	0.6s
 tree/branch_folds.sh	0.5s
 tree/branch_recency_order.sh	0.6s
+tree/branch_render_full_text_default.sh	0.6s
 tree/branch_render_limit.sh	0.8s
 tree/commands_keymaps.sh	1.0s
 tree/cross_directory_branch.sh	0.6s

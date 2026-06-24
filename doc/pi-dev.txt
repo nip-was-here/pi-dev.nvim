@@ -611,7 +611,9 @@ Tree navigation:
                                       values: 'last_per_user', 'all'
   tree.branch_render.max_messages    default: 30
   tree.branch_render.include_tool_results default: false
-  tree.branch_render.max_text_chars  default: 1200
+  tree.branch_render.max_text_chars  default: false
+                                      false or 0 renders full branch text;
+                                      positive numbers truncate restored text.
                                       Display profile used for fast branch
                                       navigation from tree/runtime switching.
 
