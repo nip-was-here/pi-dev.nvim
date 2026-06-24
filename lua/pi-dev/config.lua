@@ -25,7 +25,7 @@ M.defaults = {
     branch_render = {
       max_messages = 30,
       include_tool_results = false,
-      max_text_chars = 1200,
+      max_text_chars = false,
     },
   },
 
