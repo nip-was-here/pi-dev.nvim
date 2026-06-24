@@ -293,17 +293,19 @@ end
 
 local function strip_permission_system_denials(text)
   local ok, permission_system = pcall(require, 'pi-dev.compat.pi_permission_system')
-  if ok and permission_system.strip_denials then
-    return permission_system.strip_denials(text)
+  if ok and permission_system.strip_denials_with_status then
+    return permission_system.strip_denials_with_status(text)
   end
-  return vim.trim(tostring(text or ''))
+  return vim.trim(tostring(text or '')), false
 end
 
 local function readable_bash_result(result, text)
   local lines = {}
+  local denied = false
   if type(result) == 'table' and (result.stdout ~= nil or result.stderr ~= nil) then
-    local stdout = strip_permission_system_denials(result.stdout)
-    local stderr = strip_permission_system_denials(result.stderr)
+    local stdout, stdout_denied = strip_permission_system_denials(result.stdout)
+    local stderr, stderr_denied = strip_permission_system_denials(result.stderr)
+    denied = stdout_denied or stderr_denied
     if result.stdout ~= nil and stdout ~= '' then
       table.insert(lines, '**stdout:**')
       vim.list_extend(lines, pretty_json_lines_from_text(stdout) or fenced_lines('bash', stdout, { trim_final_empty = true }))
@@ -318,10 +320,16 @@ local function readable_bash_result(result, text)
     if #lines > 0 then
       return lines
     end
+    if denied then
+      return {}
+    end
   end
-  text = strip_permission_system_denials(text)
+  text, denied = strip_permission_system_denials(text)
   if text and normalize_line_endings(text) ~= '' then
     return pretty_json_lines_from_text(text) or fenced_lines('bash', text, { trim_final_empty = true })
+  end
+  if denied then
+    return {}
   end
   return nil
 end
@@ -377,9 +385,10 @@ local function readable_tool_result(tool_name, result, args, text, opts)
     if type(content) == 'table' then
       content = content_to_text(content)
     end
-    content = strip_permission_system_denials(content)
+    local denied
+    content, denied = strip_permission_system_denials(content)
     if content == '' then
-      return compact_empty_section_line('Output')
+      return denied and {} or compact_empty_section_line('Output')
     end
     return pretty_json_lines_from_text(content) or fenced_lines('text', tostring(content or ''), { trim_final_empty = true })
   end
@@ -407,7 +416,8 @@ local function result_to_lines(result, tool_name, args, opts)
   if text == '' and type(result) == 'table' then
     text = content_to_text(result.output or result.text or result.result or '')
   end
-  text = strip_permission_system_denials(text)
+  local denied
+  text, denied = strip_permission_system_denials(text)
   local readable = readable_tool_result(tool_name, result, args, text, opts)
   if readable then
     return readable
@@ -423,7 +433,7 @@ local function result_to_lines(result, tool_name, args, opts)
     end
   end
   if text == '' then
-    return compact_empty_section_line('Output')
+    return denied and {} or compact_empty_section_line('Output')
   end
   if looks_like_diff(text) then
     return diff_fenced_lines(text)

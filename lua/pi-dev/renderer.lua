@@ -1310,7 +1310,7 @@ local function render_permission_block(block)
     local parent_level = tostring(context_headers[#context_headers]):match('^(#+)') or '#####'
     header_level = string.rep('#', math.min(#parent_level + 1, 12))
   end
-  local header = header_level .. ' Permission request'
+  local header = header_level .. ' ' .. tostring(block.title or 'Permission request')
   if block.summary and block.summary ~= '' then
     header = header .. ': ' .. block.summary
   end
@@ -1887,6 +1887,31 @@ function M.append_user_cancelled()
   append_notice('_User cancelled._')
 end
 
+local function upsert_permission_block(id, spec, opts)
+  opts = opts or {}
+  spec = spec or {}
+  id = permission_id(id)
+  state.render.permission_blocks = state.render.permission_blocks or {}
+  local block = state.render.permission_blocks[id] or {}
+  block.title = spec.title
+  block.summary = spec.summary
+  block.started_at_ms = block.started_at_ms or permission_timestamp_milliseconds(opts, { 'startedAt', 'started_at', 'startTime', 'start_time' })
+  block.local_started_at_ms = block.local_started_at_ms or tonumber(opts.local_started_at_ms) or local_milliseconds()
+  block.finished_at_ms = spec.finished and (permission_timestamp_milliseconds(opts, { 'finishedAt', 'finished_at', 'endedAt', 'ended_at', 'endTime', 'end_time' }) or block.finished_at_ms) or nil
+  block.local_finished_at_ms = spec.finished and (tonumber(opts.local_finished_at_ms) or local_milliseconds()) or nil
+  block.subagent_context_headers = block.subagent_context_headers or latest_subagent_permission_context_headers(id)
+  block.subagent_context_header = block.subagent_context_headers and block.subagent_context_headers[1] or block.subagent_context_header
+  if type(spec.details) == 'table' then
+    block.details = spec.details
+  else
+    block.details = vim.split(tostring(spec.details or ''), '\n', { plain = true })
+  end
+  block.result = spec.result
+  state.render.permission_blocks[id] = block
+  replace_permission_block(id, render_permission_block(block), spec.fold == true)
+  return id
+end
+
 function M.append_permission_request(id, summary, details, opts)
   opts = opts or {}
   flush_live_render()
@@ -1894,24 +1919,14 @@ function M.append_permission_request(id, summary, details, opts)
     flush_pending_tool_renders()
   end
   M.update_session_title('Permission: ' .. tostring(summary or ''))
-  id = permission_id(id)
-  state.render.permission_blocks = state.render.permission_blocks or {}
-  local block = state.render.permission_blocks[id] or {}
-  block.summary = summary
-  block.started_at_ms = block.started_at_ms or permission_timestamp_milliseconds(opts, { 'startedAt', 'started_at', 'startTime', 'start_time' })
-  block.local_started_at_ms = block.local_started_at_ms or tonumber(opts.local_started_at_ms) or local_milliseconds()
-  block.finished_at_ms = nil
-  block.local_finished_at_ms = nil
-  block.subagent_context_headers = block.subagent_context_headers or latest_subagent_permission_context_headers(id)
-  block.subagent_context_header = block.subagent_context_headers and block.subagent_context_headers[1] or block.subagent_context_header
-  if type(details) == 'table' then
-    block.details = details
-  else
-    block.details = vim.split(tostring(details or ''), '\n', { plain = true })
-  end
-  block.result = nil
-  state.render.permission_blocks[id] = block
-  replace_permission_block(id, render_permission_block(block), false)
+  id = upsert_permission_block(id, {
+    title = 'Permission request',
+    summary = summary,
+    details = details,
+    result = nil,
+    finished = false,
+    fold = false,
+  }, opts)
   if schedule_permission_timer then
     schedule_permission_timer(id)
   end
@@ -2119,6 +2134,51 @@ local function schedule_tool_object_flush(id, delay_ms)
   end, delay_ms or TOOL_FLUSH_DELAY_MS)
 end
 
+local function related_permission_block_exists(summary, tool_call_id)
+  if not summary or summary == '' then
+    return false
+  end
+  local tool_block = tool_call_id and state.render.tool_blocks and state.render.tool_blocks[tool_call_id]
+  for _, block in pairs(state.render.permission_blocks or {}) do
+    if block.summary == summary then
+      if not (tool_block and tool_block.start_line and block.start_line) or block.start_line > tool_block.start_line then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+local function maybe_append_permission_denial_block(tool_call_id, object, event)
+  if not (event and event.result ~= nil and object) then
+    return false
+  end
+  local ok, permission_system = pcall(require, 'pi-dev.compat.pi_permission_system')
+  if not (ok and permission_system.denial_block_from_result) then
+    return false
+  end
+  local block = permission_system.denial_block_from_result(event.result, object.name, object.args)
+  if not block or not block.summary or block.summary == '' then
+    return false
+  end
+  if related_permission_block_exists(block.summary, tool_call_id) then
+    return false
+  end
+  local id = '__auto_permission_block_' .. tostring(tool_call_id or block.summary)
+  upsert_permission_block(id, {
+    title = block.title or 'Permission blocked',
+    summary = block.summary,
+    result = block.result or 'blocked',
+    details = block.details,
+    finished = true,
+    fold = true,
+  }, {
+    timestamp = event.timestamp or event.createdAt or event.created_at or event.time or event.date,
+    finishedAt = event.finishedAt or event.finished_at or event.endedAt or event.ended_at or event.endTime or event.end_time,
+  })
+  return true
+end
+
 local function update_tool_object(event, status)
   local id, object, created = tool_events.object_from_event(event)
   state.render.last_tool_id = id
@@ -2146,6 +2206,9 @@ local function update_tool_object(event, status)
   if event.result ~= nil then
     object.result = event.result
     object.partial_result = nil
+  end
+  if status == 'Finished' and event.result ~= nil then
+    maybe_append_permission_denial_block(id, object, event)
   end
   if created and status == 'Finished' and event.result ~= nil then
     local parent_id = tool_events.duplicate_permission_interrupted_tool_id(id, object)
