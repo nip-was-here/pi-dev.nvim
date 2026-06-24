@@ -20,6 +20,9 @@ function M.request_exists(runtime, request_id)
     return false
   end
   runtime = runtime or state.active_rpc_runtime()
+  if runtime and runtime.cleared_extension_ui_requests and runtime.cleared_extension_ui_requests[request_id] then
+    return true
+  end
   local key = runtime and runtime.key or state.rpc.active_key
   local visible = state.ui.interaction
   if visible and visible.request_id == request_id and tostring(visible.runtime_key or state.rpc.active_key) == tostring(key) then

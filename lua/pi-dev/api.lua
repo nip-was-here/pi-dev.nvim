@@ -256,6 +256,7 @@ function M.local_bash(command, callback)
 end
 
 function M.abort(callback)
+  require('pi-dev.extension_ui').clear_runtime_interactions(state.rpc.active_key)
   renderer.append_user_cancelled()
   return rpc.request({ type = 'abort' }, function(response)
     record_command_response(response)

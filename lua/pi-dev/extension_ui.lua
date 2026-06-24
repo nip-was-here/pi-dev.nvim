@@ -50,6 +50,9 @@ local function request_already_tracked(runtime, request)
   if not runtime or not request_id or request_id == '' then
     return false
   end
+  if runtime.cleared_extension_ui_requests and runtime.cleared_extension_ui_requests[request_id] then
+    return true
+  end
   if runtime.pending_extension_ui_request and runtime.pending_extension_ui_request.id == request_id then
     return true
   end
@@ -64,6 +67,7 @@ local function remember_pending_interaction_request(request)
     return
   end
   local runtime = request.__pi_runtime_key and state.ensure_rpc_runtime(request.__pi_runtime_key) or state.active_rpc_runtime()
+  request.__pi_runtime_key = request.__pi_runtime_key or runtime.key
   if request_already_tracked(runtime, request) then
     return
   end
@@ -71,6 +75,67 @@ local function remember_pending_interaction_request(request)
   runtime.waiting_input = state.is_job_running(runtime)
   runtime.status = runtime.waiting_input and 'waiting input' or (state.is_job_running(runtime) and 'idle' or 'not connected')
   state.sync_active_rpc_runtime(runtime)
+end
+
+local function idle_status(runtime)
+  if runtime and runtime.active == true then
+    return 'running'
+  end
+  return state.is_job_running(runtime) and 'idle' or 'not connected'
+end
+
+local function remember_cleared_request_id(runtime, request_id)
+  if not runtime or not request_id or request_id == '' then
+    return
+  end
+  runtime.cleared_extension_ui_requests = runtime.cleared_extension_ui_requests or {}
+  runtime.cleared_extension_ui_requests[request_id] = true
+end
+
+local function remember_cleared_interactions(runtime)
+  remember_cleared_request_id(runtime, runtime.pending_extension_ui_request and runtime.pending_extension_ui_request.id)
+  local current = runtime.current_extension_interaction
+  remember_cleared_request_id(runtime, current and current.opts and current.opts.request_id)
+  for _, item in ipairs(runtime.interaction_queue or {}) do
+    remember_cleared_request_id(runtime, item and item.opts and item.opts.request_id)
+  end
+  local visible = state.ui.interaction
+  if visible and tostring(visible.runtime_key or state.rpc.active_key) == tostring(runtime.key) then
+    remember_cleared_request_id(runtime, visible.request_id)
+  end
+end
+
+function M.clear_runtime_interactions(runtime_key)
+  local runtime = runtime_key and state.ensure_rpc_runtime(runtime_key) or state.active_rpc_runtime()
+  if not runtime then
+    return false
+  end
+
+  remember_cleared_interactions(runtime)
+  if ui.close_visible_extension_interaction_for_runtime then
+    ui.close_visible_extension_interaction_for_runtime(runtime.key)
+  end
+  runtime.pending_extension_ui_request = nil
+  runtime.current_extension_interaction = nil
+  runtime.interaction_queue = {}
+  runtime.editor_text = ''
+  runtime.waiting_input = false
+  if runtime.status == 'waiting input' then
+    runtime.status = idle_status(runtime)
+  end
+  if pi_permission_system.clear_pending_state then
+    pi_permission_system.clear_pending_state()
+  end
+  state.sync_active_rpc_runtime(runtime)
+  if runtime.key == state.rpc.active_key then
+    state.statusline.waiting_input = false
+    state.statusline.status = runtime.status or idle_status(runtime)
+    state.statusline.active = runtime.active == true
+    state.statusline.loading = runtime.loading == true
+    state.statusline.error = runtime.error
+  end
+  ui.refresh_chrome()
+  return true
 end
 
 function M.handle_request(request)
