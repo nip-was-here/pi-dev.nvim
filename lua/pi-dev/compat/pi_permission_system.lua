@@ -690,19 +690,183 @@ function M.request_tree_summary(request)
   return M.request_summary(request)
 end
 
+local function tool_result_texts(value, out, seen)
+  out = out or {}
+  seen = seen or {}
+  if type(value) == 'string' then
+    table.insert(out, value)
+  elseif type(value) == 'table' and not seen[value] then
+    seen[value] = true
+    for _, field in ipairs({ 'stdout', 'stderr', 'output', 'text', 'result', 'response', 'content' }) do
+      if value[field] ~= nil and value[field] ~= vim.NIL then
+        tool_result_texts(value[field], out, seen)
+      end
+    end
+    if vim.islist and vim.islist(value) then
+      for _, item in ipairs(value) do
+        tool_result_texts(item, out, seen)
+      end
+    end
+  end
+  return out
+end
+
+local function tool_result_denial_lines(result)
+  local lines = {}
+  for _, text in ipairs(tool_result_texts(result)) do
+    for _, line in ipairs(vim.split(normalize_line_endings(text), '\n', { plain = true })) do
+      if M.is_denial_line(line) then
+        table.insert(lines, line)
+      end
+    end
+  end
+  return lines
+end
+
+local function tool_args_summary(tool_name, args, fallback_line)
+  args = type(args) == 'table' and args or {}
+  local name = tostring(tool_name or '')
+  if name == 'bash' and args.command and args.command ~= '' then
+    return 'bash `' .. truncate(args.command, 80) .. '`'
+  end
+  local path = args.path or args.file or args.filePath or args.file_path
+  if path and tostring(path) ~= '' then
+    if tostring(fallback_line or ''):find('external directory access', 1, true) then
+      return 'External directory access: `' .. truncate(path, 70) .. '`'
+    end
+    return tostring(name ~= '' and name or 'tool') .. ' `' .. truncate(path, 80) .. '`'
+  end
+  return 'permission-system block'
+end
+
+local function denial_details(kind, data)
+  local lines = {}
+  if kind == 'auto_rule' then
+    table.insert(lines, 'Blocked by permission-system rule.')
+    if data.rule and data.rule ~= '' then
+      table.insert(lines, 'Rule: `' .. data.rule .. '`')
+    end
+    if data.tool and data.tool ~= '' then
+      table.insert(lines, 'Tool: `' .. data.tool .. '`')
+    end
+    if data.command and data.command ~= '' then
+      table.insert(lines, '')
+      table.insert(lines, 'Command:')
+      vim.list_extend(lines, fenced_detail_lines(data.tool == 'bash' and 'bash' or '', data.command))
+    end
+  elseif kind == 'user_denied' then
+    table.insert(lines, 'Denied by permission-system response.')
+    if data.reason and data.reason ~= '' then
+      table.insert(lines, 'Reason: ' .. data.reason)
+    end
+  else
+    table.insert(lines, 'Blocked by permission-system response.')
+  end
+  return lines
+end
+
+local function parse_denial_line(line, tool_name, args)
+  local tool, command, rule = line:match("^%[pi%-permission%-system%]%s+is not permitted to run '([^']+)' command '(.*)' %([Mm]atched '([^']+)'%)%.?%s*$")
+  if tool and command then
+    return {
+      title = 'Permission blocked',
+      summary = tostring(tool) .. ' `' .. truncate(command, 80) .. '`',
+      result = rule and ('rule `' .. rule .. '`') or 'blocked',
+      details = denial_details('auto_rule', { tool = tool, command = command, rule = rule }),
+      automatic = true,
+    }
+  end
+
+  command, rule = line:match("^%[pi%-permission%-system%]%s+is not permitted to run .- command '(.*)' %([Mm]atched '([^']+)'%)%.?%s*$")
+  if command then
+    local name = tostring(tool_name or 'tool')
+    return {
+      title = 'Permission blocked',
+      summary = name .. ' `' .. truncate(command, 80) .. '`',
+      result = rule and ('rule `' .. rule .. '`') or 'blocked',
+      details = denial_details('auto_rule', { tool = name, command = command, rule = rule }),
+      automatic = true,
+    }
+  end
+
+  command, rule = line:match("^%[pi%-permission%-system%]%s+is not permitted .- '(.*)' %([Mm]atched '([^']+)'%)%.?%s*$")
+  if command then
+    return {
+      title = 'Permission blocked',
+      summary = tool_args_summary(tool_name, args, line),
+      result = rule and ('rule `' .. rule .. '`') or 'blocked',
+      details = denial_details('auto_rule', { tool = tostring(tool_name or 'tool'), command = command, rule = rule }),
+      automatic = true,
+    }
+  end
+
+  local denied_command, reason = line:match("^%[pi%-permission%-system%]%s+User denied bash command '(.*)'%.%s+Reason:%s*(.-)%s*$")
+  denied_command = denied_command or line:match("^%[pi%-permission%-system%]%s+User denied bash command '(.*)'%.?%s*$")
+  if denied_command then
+    local result = reason and reason ~= '' and denial_reason_summary(reason) or 'No'
+    return {
+      title = 'Permission denied',
+      summary = 'bash `' .. truncate(denied_command, 80) .. '`',
+      result = result,
+      details = denial_details('user_denied', { reason = reason }),
+      automatic = false,
+    }
+  end
+
+  local denied_tool, denied_path = line:match("^%[pi%-permission%-system%]%s+User denied external directory access for tool '([^']+)' path '([^']+)'%.?%s*$")
+  if denied_tool and denied_path then
+    return {
+      title = 'Permission denied',
+      summary = 'External directory access: `' .. truncate(denied_path, 70) .. '`',
+      result = 'No',
+      details = denial_details('user_denied', {}),
+      automatic = false,
+    }
+  end
+
+  if M.is_denial_line(line) then
+    return {
+      title = line:find('User denied', 1, true) and 'Permission denied' or 'Permission blocked',
+      summary = tool_args_summary(tool_name, args, line),
+      result = line:find('User denied', 1, true) and 'No' or 'blocked',
+      details = denial_details('unknown', {}),
+      automatic = line:find('User denied', 1, true) == nil,
+    }
+  end
+  return nil
+end
+
+function M.denial_block_from_result(result, tool_name, args)
+  for _, line in ipairs(tool_result_denial_lines(result)) do
+    local block = parse_denial_line(line, tool_name, args)
+    if block then
+      return block
+    end
+  end
+  return nil
+end
+
 function M.is_denial_line(line)
   return tostring(line or ''):match('^%[pi%-permission%-system%]%s+User denied ') ~= nil
     or tostring(line or ''):match('^%[pi%-permission%-system%]%s+is not permitted ') ~= nil
 end
 
-function M.strip_denials(text)
+function M.strip_denials_with_status(text)
   local kept = {}
+  local stripped = false
   for _, line in ipairs(vim.split(tostring(text or ''), '\n', { plain = true })) do
-    if not M.is_denial_line(line) then
+    if M.is_denial_line(line) then
+      stripped = true
+    else
       table.insert(kept, line)
     end
   end
-  return vim.trim(table.concat(kept, '\n'))
+  return vim.trim(table.concat(kept, '\n')), stripped
+end
+
+function M.strip_denials(text)
+  local stripped = M.strip_denials_with_status(text)
+  return stripped
 end
 
 function M.handle_request(request, respond)

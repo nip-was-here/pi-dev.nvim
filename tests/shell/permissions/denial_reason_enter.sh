@@ -96,6 +96,26 @@ assert(text:find('is not permitted to run', 1, true) == nil, text)
 assert(text:find("matched 'rm *'", 1, true) == nil, text)
 assert(text:find('#### Permission request: bash `rm -f tmp/new_state.lua tmp/new_rpc.lua` - No', 1, true) ~= nil, text)
 
+renderer.clear('Permission automatic block style test')
+renderer.handle_event({
+  type = 'tool_execution_start',
+  toolCallId = 'deny-tool-auto-block',
+  toolName = 'bash',
+  args = { command = 'rm -f tmp/new_state.lua tmp/new_rpc.lua' },
+})
+renderer.handle_event({
+  type = 'tool_execution_end',
+  toolCallId = 'deny-tool-auto-block',
+  toolName = 'bash',
+  result = { content = { { type = 'text', text = "[pi-permission-system] is not permitted to run 'bash' command 'rm -f tmp/new_state.lua tmp/new_rpc.lua' (matched 'rm *')." } } },
+})
+text = table.concat(vim.api.nvim_buf_get_lines(state.ui.output_buf, 0, -1, false), '\n')
+assert(text:find('[pi-permission-system]', 1, true) == nil, text)
+assert(text:find('is not permitted to run', 1, true) == nil, text)
+assert(text:find('#### Permission blocked: bash `rm -f tmp/new_state.lua tmp/new_rpc.lua` - rule `rm *`', 1, true) ~= nil, text)
+assert(text:find('Rule: `rm *`', 1, true), text)
+assert(text:find('Output: `empty`', 1, true) == nil, text)
+
 renderer.clear('Permission raw denial stdio style test')
 renderer.handle_event({
   type = 'tool_execution_start',
