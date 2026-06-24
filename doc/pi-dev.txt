@@ -98,8 +98,8 @@ Manual setup is also supported and idempotent: >lua
 
 When Pi is idle, submitted text sends a normal prompt. When Pi is already
 processing, submitted text is routed as steering input. Use `<C-c>` in a Pi
-window or `:PiDevAbort` to request cancellation of the active operation without
-locally discarding visible or queued extension interactions.
+window or `:PiDevAbort` to request cancellation of the active operation and
+clear active permission or extension interaction prompts for that runtime.
 
 ===============================================================================
 5. UI model                                                    *pi-dev-ui-model*
@@ -158,7 +158,8 @@ Rendering and folds ~
 
                                                         *:PiDevAbort*
 :PiDevAbort             Cancel current Pi operation without stopping the RPC
-                        runtime when possible.
+                        runtime when possible. Active permission or extension
+                        interaction prompts for that runtime are cleared.
 
                                                         *:PiDevStopRpc*
 :PiDevStopRpc           Kill the Pi RPC process attached to the current branch.
@@ -333,10 +334,11 @@ Runtime pool ~
 
 Abort, stop, reload ~
   Abort requests cancellation while keeping the active runtime attached when
-  possible. Stop/quit terminates the current branch runtime and discards its
-  volatile runtime-local state. Reload restarts only the active runtime and asks
-  for confirmation only when that runtime has volatile state; inactive branch
-  runtimes remain attached.
+  possible. It clears active permission or extension interaction prompts owned
+  by that runtime. Stop/quit terminates the current branch runtime and discards
+  its volatile runtime-local state. Reload restarts only the active runtime and
+  asks for confirmation only when that runtime has volatile state; inactive
+  branch runtimes remain attached.
 
 Model changes ~
   Model picking is allowed when the active runtime is idle or waiting for input.

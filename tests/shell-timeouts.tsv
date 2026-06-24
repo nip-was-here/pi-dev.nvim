@@ -65,6 +65,7 @@ rpc/env_and_reload_restore.sh	0.6s
 rpc/fake_process.sh	0.6s
 rpc/protocol_edges.sh	0.5s
 rpc/response_ownership.sh	0.5s
+runtime/abort_clears_extension_interactions.sh	0.5s
 runtime/cycle_rpc_runtimes.sh	0.6s
 runtime/local_editor_draft_switch.sh	0.5s
 runtime/local_input_editor_state.sh	0.5s

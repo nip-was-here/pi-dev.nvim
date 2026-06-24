@@ -869,6 +869,11 @@ function M.strip_denials(text)
   return stripped
 end
 
+function M.clear_pending_state()
+  pending_denial_reason = false
+  pending_permission_id = nil
+end
+
 function M.handle_request(request, respond)
   if not enabled() then
     return false

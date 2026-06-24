@@ -78,7 +78,8 @@ bottom layout is also configurable.
   as cost, tokens, context, and model.
 
 Hiding the panel does not stop active RPC runtimes. Abort asks Pi to cancel the
-current operation while keeping the runtime attached when possible. Stop/quit
+current operation while keeping the runtime attached when possible, and clears
+active permission or extension interaction prompts for that runtime. Stop/quit
 kills the current branch runtime and discards its volatile runtime-local state.
 `<C-W>=` restores the configured right-panel width; ordinary manual resizing is
 preserved.

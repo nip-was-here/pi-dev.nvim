@@ -87,6 +87,7 @@ local function runtime_defaults(key)
     current_extension_interaction = nil,
     pending_mcp_auth_server = nil,
     interaction_queue = {},
+    cleared_extension_ui_requests = {},
     input_text = '',
     editor_text = '',
     model = nil,
@@ -282,6 +283,7 @@ function M.reset_rpc_runtime(runtime, remove)
   runtime.current_extension_interaction = nil
   runtime.pending_mcp_auth_server = nil
   runtime.interaction_queue = {}
+  runtime.cleared_extension_ui_requests = {}
   runtime.input_text = ''
   runtime.editor_text = ''
   runtime.model = nil

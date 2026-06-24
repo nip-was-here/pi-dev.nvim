@@ -20,7 +20,7 @@ A Pi RPC runtime owns one `pi --mode rpc` job plus its request table, stream buf
 
 The pool is configured by `rpc.pool_size`, defaulting to 8 and capped at 8. If switching or forking needs another runtime and the pool is exhausted, show a user-visible error telling the user to stop an idle branch RPC before switching.
 
-Users can cancel the current operation through `:PiDevAbort`, `<leader>ac`, or `<C-c>` in Pi windows. Cancel requests use Pi's abort RPC message for the active Pi operation while keeping the current runtime attached when possible. It does not locally discard visible or queued extension interactions; if Pi cancels them, the normal RPC/event path clears or updates them.
+Users can cancel the current operation through `:PiDevAbort`, `<leader>ac`, or `<C-c>` in Pi windows. Cancel requests use Pi's abort RPC message for the active Pi operation while keeping the current runtime attached when possible. A user-initiated abort locally clears visible, pending, saved, and queued extension interactions owned by the active runtime so stale permission prompts do not remain after cancellation.
 
 Users can kill the current branch runtime process through `:PiDevStopRpc`, `<leader>aK`, `/stop-rpc`, `/stop`, or `/quit`. These explicit kill/stop commands do not ask for confirmation. Stopping a runtime closes any visible extension-origin interaction owned by that runtime and discards its runtime-local input draft, editor text, pending request, saved current interaction, and queued interactions.
 
