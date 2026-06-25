@@ -387,9 +387,9 @@ local function update_runtime_from_event(runtime, message)
   if message.type == 'agent_start' then
     runtime.loading = false
     runtime.active = true
-    runtime.waiting_input = false
+    runtime.waiting_input = has_pending_interaction(runtime)
     runtime.error = nil
-    runtime.status = 'running'
+    runtime.status = runtime_status(runtime)
     clear_idle_timer(runtime)
   elseif message.type == 'agent_end' then
     runtime.active = false
@@ -404,23 +404,23 @@ local function update_runtime_from_event(runtime, message)
   elseif message.type == 'message_start' then
     runtime.loading = false
     runtime.active = true
-    runtime.waiting_input = false
-    runtime.status = 'running'
+    runtime.waiting_input = has_pending_interaction(runtime)
+    runtime.status = runtime_status(runtime)
     clear_idle_timer(runtime)
   elseif message.type == 'message_update' then
     runtime.active = true
-    runtime.waiting_input = false
-    runtime.status = 'running'
+    runtime.waiting_input = has_pending_interaction(runtime)
+    runtime.status = runtime_status(runtime)
     clear_idle_timer(runtime)
   elseif message.type == 'tool_execution_start' or message.type == 'tool_execution_update' then
     runtime.active = true
-    runtime.waiting_input = false
-    runtime.status = 'running'
+    runtime.waiting_input = has_pending_interaction(runtime)
+    runtime.status = runtime_status(runtime)
     clear_idle_timer(runtime)
   elseif message.type == 'tool_execution_end' then
     runtime.active = true
-    runtime.waiting_input = false
-    runtime.status = 'running'
+    runtime.waiting_input = has_pending_interaction(runtime)
+    runtime.status = runtime_status(runtime)
     clear_idle_timer(runtime)
   elseif message.type == 'queue_update' then
     runtime.status = runtime.active and 'queue update' or runtime_status(runtime)
@@ -434,8 +434,8 @@ local function update_runtime_from_event(runtime, message)
     runtime.status = 'error'
   elseif message.type == 'compaction_start' or message.type == 'auto_retry_start' then
     runtime.active = true
-    runtime.waiting_input = false
-    runtime.status = message.type == 'compaction_start' and 'compacting' or 'retrying'
+    runtime.waiting_input = has_pending_interaction(runtime)
+    runtime.status = runtime.waiting_input and 'waiting input' or (message.type == 'compaction_start' and 'compacting' or 'retrying')
     if message.type == 'compaction_start' then
       runtime.cost = nil
       runtime.tokens = nil
@@ -445,9 +445,9 @@ local function update_runtime_from_event(runtime, message)
   elseif message.type == 'compaction_end' then
     if message.isStreaming ~= nil and message.isStreaming ~= vim.NIL then
       runtime.active = message.isStreaming == true
-      runtime.waiting_input = runtime.active and runtime.waiting_input == true or has_pending_interaction(runtime)
+      runtime.waiting_input = has_pending_interaction(runtime)
     end
-    runtime.status = runtime.active and 'running' or runtime_status(runtime)
+    runtime.status = runtime_status(runtime)
   elseif message.type == 'auto_retry_end' then
     runtime.status = runtime_status(runtime)
   end

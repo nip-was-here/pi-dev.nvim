@@ -1278,7 +1278,11 @@ local function permission_duration_milliseconds(block)
 end
 
 local function permission_duration_suffix(block)
-  local label = format.human_duration_from_milliseconds(permission_duration_milliseconds(block))
+  local duration = permission_duration_milliseconds(block)
+  if not duration or duration < 1000 then
+    return nil
+  end
+  local label = format.human_duration_from_milliseconds(duration)
   return label and ('(' .. label .. ')') or nil
 end
 
@@ -1310,19 +1314,16 @@ local function render_permission_block(block)
     local parent_level = tostring(context_headers[#context_headers]):match('^(#+)') or '#####'
     header_level = string.rep('#', math.min(#parent_level + 1, 12))
   end
-  local header = header_level .. ' ' .. tostring(block.title or 'Permission request')
+  local title = tostring(block.title or 'Permission request')
   if block.summary and block.summary ~= '' then
-    header = header .. ': ' .. block.summary
+    title = title .. ': ' .. block.summary
+  end
+  if block.result and block.result ~= '' then
+    title = title .. ' - ' .. compact_header_text(block.result)
   end
   local duration_suffix = permission_duration_suffix(block)
-  if block.result and block.result ~= '' then
-    header = header .. ' - ' .. compact_header_text(block.result)
-    if duration_suffix then
-      header = header .. ' ' .. duration_suffix
-    end
-  elseif duration_suffix then
-    header = header .. ' ' .. duration_suffix
-  end
+  local header = duration_suffix and right_aligned_heading(#header_level, title, duration_suffix, { suffix_shift = -1 })
+    or (header_level .. ' ' .. title)
   local lines = { '' }
   for _, context_header in ipairs(context_headers or {}) do
     table.insert(lines, context_header)

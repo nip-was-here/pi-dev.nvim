@@ -360,8 +360,8 @@ function M.handle_event(event)
     state.statusline.error = nil
     state.statusline.loading = false
     state.statusline.active = true
-    state.statusline.waiting_input = false
-    state.statusline.status = 'running'
+    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
   elseif event.type == 'agent_end' then
     state.statusline.active = false
     state.statusline.waiting_input = has_pending_interaction()
@@ -374,21 +374,22 @@ function M.handle_event(event)
       state.statusline.compaction_previous_waiting_input = state.statusline.waiting_input == true
     end
     state.statusline.active = true
-    state.statusline.status = 'compacting'
+    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'compacting'
     clear_stats(state.statusline)
     clear_stats(state.active_rpc_runtime())
   elseif event.type == 'compaction_end' then
     local streaming_known = not is_nil(event.isStreaming)
     local active = streaming_known and event.isStreaming == true or state.statusline.compaction_previous_active == true
     state.statusline.active = active
-    state.statusline.waiting_input = active and state.statusline.compaction_previous_waiting_input == true or has_pending_interaction()
+    state.statusline.waiting_input = has_pending_interaction() or (active and state.statusline.compaction_previous_waiting_input == true) or false
     state.statusline.compaction_previous_active = nil
     state.statusline.compaction_previous_waiting_input = nil
     state.statusline.status = baseline_status()
   elseif event.type == 'auto_retry_start' then
     state.statusline.active = true
-    state.statusline.waiting_input = false
-    state.statusline.status = 'retrying'
+    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'retrying'
   elseif event.type == 'auto_retry_end' then
     state.statusline.status = baseline_status()
   elseif event.type == 'message_start' then
@@ -399,21 +400,21 @@ function M.handle_event(event)
     if role == 'user' or role == 'assistant' then
       state.statusline.loading = false
       state.statusline.active = true
-      state.statusline.waiting_input = false
-      state.statusline.status = 'running'
+      state.statusline.waiting_input = has_pending_interaction()
+      state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
     end
   elseif event.type == 'message_update' then
     state.statusline.active = true
-    state.statusline.waiting_input = false
-    state.statusline.status = 'running'
+    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
   elseif event.type == 'tool_execution_start' or event.type == 'tool_execution_update' then
     state.statusline.active = true
-    state.statusline.waiting_input = false
-    state.statusline.status = 'running'
+    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
   elseif event.type == 'tool_execution_end' then
     state.statusline.active = true
-    state.statusline.waiting_input = false
-    state.statusline.status = 'running'
+    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
   elseif event.type == 'queue_update' then
     state.statusline.status = state.statusline.active and 'queue update' or runtime_status()
   elseif event.type == 'extension_ui_request' then
