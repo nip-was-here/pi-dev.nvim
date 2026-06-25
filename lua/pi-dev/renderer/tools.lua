@@ -299,6 +299,10 @@ local function strip_permission_system_denials(text)
   return vim.trim(tostring(text or '')), false
 end
 
+local function is_no_output_sentinel(text)
+  return vim.trim(normalize_line_endings(text or '')):lower() == '(no output)'
+end
+
 local function readable_bash_result(result, text)
   local lines = {}
   local denied = false
@@ -306,6 +310,12 @@ local function readable_bash_result(result, text)
     local stdout, stdout_denied = strip_permission_system_denials(result.stdout)
     local stderr, stderr_denied = strip_permission_system_denials(result.stderr)
     denied = stdout_denied or stderr_denied
+    if is_no_output_sentinel(stdout) then
+      stdout = ''
+    end
+    if is_no_output_sentinel(stderr) then
+      stderr = ''
+    end
     if result.stdout ~= nil and stdout ~= '' then
       table.insert(lines, '**stdout:**')
       vim.list_extend(lines, pretty_json_lines_from_text(stdout) or fenced_lines('bash', stdout, { trim_final_empty = true }))
@@ -418,6 +428,9 @@ local function result_to_lines(result, tool_name, args, opts)
   end
   local denied
   text, denied = strip_permission_system_denials(text)
+  if is_no_output_sentinel(text) then
+    text = ''
+  end
   local readable = readable_tool_result(tool_name, result, args, text, opts)
   if readable then
     return readable

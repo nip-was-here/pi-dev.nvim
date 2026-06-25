@@ -36,6 +36,29 @@ local function permission(id, command)
 end
 
 ui.show()
+rpc.use_runtime('race-a', { branch_entry_id = 'race-a' })
+ext.handle_request(vim.tbl_extend('force', permission('perm-race-a', 'echo race'), { __pi_runtime_key = 'race-a' }))
+rpc.use_runtime('race-b', { branch_entry_id = 'race-b' })
+local scheduled_callbacks_ran = false
+vim.schedule(function()
+  scheduled_callbacks_ran = true
+end)
+assert(vim.wait(1000, function() return scheduled_callbacks_ran end), 'scheduled permission render did not run')
+assert(state.rpc.active_key == 'race-b', state.rpc.active_key)
+assert(state.ui.interaction == nil, 'inactive branch permission must not replace the active runtime UI')
+local runtime_race_a = state.ensure_rpc_runtime('race-a')
+assert(#(runtime_race_a.interaction_queue or {}) == 1, 'inactive branch permission should be saved for its runtime after a switch race')
+rpc.use_runtime('race-a')
+assert(vim.wait(1000, function()
+  return state.ui.interaction and state.ui.interaction.request_id == 'perm-race-a' and state.ui.interaction.kind == 'permission'
+end), 'raced permission should restore when returning to its runtime')
+vim.cmd('stopinsert')
+vim.api.nvim_set_current_win(state.ui.input_win)
+vim.api.nvim_feedkeys('1', 'xt', false)
+assert(vim.wait(1000, function() return sent[1] ~= nil end), 'raced permission response missing')
+assert(sent[1].id == 'perm-race-a' and sent[1].value == 'Yes', vim.inspect(sent[1]))
+sent = {}
+
 rpc.use_runtime('branch-a', { branch_entry_id = 'a' })
 ui.show_interaction({ title = 'Branch A overlay', items = { { label = 'close a' } } })
 ext.handle_request(permission('perm-a', 'echo a'))

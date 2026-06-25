@@ -1046,7 +1046,14 @@ end
 
 function M.show_interaction(opts)
   opts = opts or {}
-  if opts.request_id and interaction_request_exists(runtime_for_interaction(opts), opts.request_id) then
+  local runtime = runtime_for_interaction(opts)
+  opts.runtime_key = opts.runtime_key or (runtime and runtime.key) or state.rpc.active_key
+  if opts.request_id and interaction_request_exists(runtime, opts.request_id) then
+    return false
+  end
+  if tostring(opts.runtime_key or state.rpc.active_key) ~= tostring(state.rpc.active_key or 'default') then
+    enqueue_interaction('select', opts)
+    M.refresh_chrome()
     return false
   end
   local current_interaction = state.ui.interaction
@@ -1305,7 +1312,14 @@ end
 
 function M.show_text_interaction(opts)
   opts = opts or {}
-  if opts.request_id and interaction_request_exists(runtime_for_interaction(opts), opts.request_id) then
+  local runtime = runtime_for_interaction(opts)
+  opts.runtime_key = opts.runtime_key or (runtime and runtime.key) or state.rpc.active_key
+  if opts.request_id and interaction_request_exists(runtime, opts.request_id) then
+    return false
+  end
+  if tostring(opts.runtime_key or state.rpc.active_key) ~= tostring(state.rpc.active_key or 'default') then
+    enqueue_interaction('text', opts)
+    M.refresh_chrome()
     return false
   end
   local current_priority = visible_interaction_priority()
