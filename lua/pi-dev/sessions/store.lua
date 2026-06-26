@@ -196,4 +196,10 @@ function M.same_directory(path, dir)
   return path ~= nil and dir ~= nil and M.normalize_path(vim.fn.fnamemodify(path, ':h')) == dir
 end
 
+function M.is_trash_path(path)
+  local trash = M.normalize_path(vim.fs.joinpath(M.root(), '.trash'))
+  path = M.normalize_path(path)
+  return path ~= nil and trash ~= nil and M.path_is_inside(path, trash)
+end
+
 return M

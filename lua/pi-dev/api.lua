@@ -440,6 +440,10 @@ function M.waiting()
   return sessions.waiting()
 end
 
+function M.delete_session(callback)
+  return require('pi-dev.sessions.delete').delete_current(callback)
+end
+
 function M.open_subagent_buffer()
   return ui.open_subagent_at_cursor()
 end

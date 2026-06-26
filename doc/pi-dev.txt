@@ -198,6 +198,13 @@ Rendering and folds ~
                                                         *:PiDevResume*
 :PiDevResume            Pick a current-directory Pi session.
 
+                                                        *:PiDevDeleteSession*
+:PiDevDeleteSession     Delete a root session tree after a single confirmation:
+                        the selected row when the resume picker is active,
+                        otherwise the currently open tree. The default answer is
+                        No; confirmed actions can move the tree to trash or
+                        fully delete it.
+
                                                         *:PiDevModel*
 :PiDevModel             Pick a Pi model. Model changes are unavailable during
                         active streaming/tool work; try again after the turn.
@@ -257,6 +264,7 @@ Slash commands ~                                      *pi-dev-slash-commands*
     /hotkeys            Show plugin commands and configured hotkeys.
     /model              Pick a Pi model when idle or waiting.
     /resume             Pick a current-directory session.
+    /delete-session     Delete or trash the selected resume/current session tree.
     /reload             Restart active RPC runtime and reload session context.
     /stop-rpc, /stop    Kill the current branch RPC process.
     /quit               Alias for killing the current branch RPC process.
@@ -351,6 +359,20 @@ Destructive root switches ~
   reset. Confirming stops affected runtimes, discards their volatile state, and
   starts one fresh runtime for the selected session. Moving inside the same root
   session tree is non-destructive.
+
+Session deletion ~
+  `/delete-session` and `:PiDevDeleteSession` delete the selected `/resume` root
+  row when the resume picker is active; otherwise they operate on the currently
+  open session. They affect the whole root session tree: the root JSONL file and
+  its branch files. A single select prompt is shown with `No` first as the
+  default, `Yes, move session tree to trash`, and
+  `Yes, fully delete session tree`. Moving to trash places the files and a
+  manifest under `{session_root}/.trash/pi-dev/` so the tree can be manually
+  restored; full delete removes the tree files permanently. Related branch-bound
+  runtimes are stopped. Current session state is cleared only when the deleted
+  tree is the current tree, and no new session is created automatically. After
+  deleting from the resume picker, the picker is refreshed without the deleted
+  row.
 
 ===============================================================================
 9. Tree, waiting, and subagent buffers                    *pi-dev-navigation*
