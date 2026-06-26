@@ -232,6 +232,10 @@ function M.waiting()
   return M.api.waiting()
 end
 
+function M.delete_session(callback)
+  return M.api.delete_session(callback)
+end
+
 function M.open_subagent_buffer()
   return M.api.open_subagent_buffer()
 end

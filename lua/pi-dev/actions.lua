@@ -198,6 +198,14 @@ function M.command_specs(api)
     end,
   },
   {
+    id = 'delete_session',
+    command = 'PiDevDeleteSession',
+    command_desc = 'Delete or trash the current Pi session tree',
+    run = function()
+      api.delete_session()
+    end,
+  },
+  {
     id = 'subagent_open',
     command = 'PiDevSubagentOpen',
     command_desc = 'Open the subagent chat buffer under the cursor',
@@ -237,6 +245,7 @@ function M.slash_specs(api)
     { names = { 'next-rpc', 'cycle-rpc' }, run = function() api.next_rpc() end },
     { names = { 'prev-rpc', 'previous-rpc' }, run = function() api.previous_rpc() end },
     { names = { 'new' }, run = function() api.new_session() end },
+    { names = { 'delete-session' }, run = function() api.delete_session() end },
     { names = { 'subagent-open' }, run = function() api.open_subagent_buffer() end },
     { names = { 'subagent-parent' }, run = function() api.return_to_parent_agent_buffer() end },
   }
@@ -275,6 +284,7 @@ function M.fallback_completion_commands()
     { name = 'waiting', description = 'Navigate branches currently waiting for input' },
     { name = 'new', description = 'Create and switch to a new Pi session' },
     { name = 'stop-rpc', description = 'Kill the current branch Pi RPC process' },
+    { name = 'delete-session', description = 'Delete or trash the current Pi session tree' },
     { name = 'next-rpc', description = 'Cycle to the next running branch Pi RPC runtime' },
     { name = 'cycle-rpc', description = 'Alias for next-rpc' },
     { name = 'prev-rpc', description = 'Cycle to the previous running branch Pi RPC runtime' },

@@ -104,6 +104,7 @@ preserved.
 | Show plugin hotkeys/commands | `:PiDevHotkeys` | - | `/hotkeys` |
 | Start a new Pi session and reset old-root runtimes | `:PiDevNewSession` | `<leader>an` | `/new` |
 | Resume a current-directory session | `:PiDevResume` | `<leader>ar` | `/resume` |
+| Delete or trash the current session tree | `:PiDevDeleteSession` | - | `/delete-session` |
 | Pick a Pi model when idle/waiting | `:PiDevModel` | `<leader>am` | `/model` |
 | Restart active RPC runtime and reload session context | `:PiDevReload` | `<leader>aR` | `/reload` |
 | Open tree/fork navigation | `:PiDevTree` | `<leader>at` | `/tree` |
@@ -142,6 +143,10 @@ Useful navigation flows:
   messages, and can navigate back to response rows.
 - `/waiting` shows only branches with live/respondable extension UI state and
   reopens the pending/current/queued interaction after switching.
+- `/delete-session` deletes a root session tree after a single confirmation:
+  the selected row when the `/resume` picker is active, otherwise the currently
+  open tree. The default answer is `No`; confirmation can move all session files
+  in the tree to `.trash/pi-dev/` for manual restore, or fully delete them.
 
 Switching to a different root session tree resets old-root runtimes. pi-dev.nvim
 asks first when connected runtimes have active work, live/respondable

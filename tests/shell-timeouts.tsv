@@ -78,6 +78,7 @@ sessions/auto_name_branch_sessions.sh	0.6s
 sessions/chat_buffer_title_dedupe.sh	0.6s
 sessions/cwd_reload_empty_session_first_prompt.sh	0.5s
 sessions/cwd_switch_restart_restore.sh	0.6s
+sessions/delete_session.sh	0.6s
 sessions/destructive_switch_draft_guard.sh	0.5s
 sessions/dirchanged_defer_volatile_state.sh	0.5s
 sessions/explicit_reload_confirm_volatile_state.sh	0.7s

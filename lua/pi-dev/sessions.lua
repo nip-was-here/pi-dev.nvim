@@ -851,6 +851,7 @@ local function visible_user_session(path, header, cwd)
     and header.type == 'session'
     and store.normalize_path(header.cwd) == cwd
     and not is_internal_run_session(path)
+    and not store.is_trash_path(path)
 end
 
 function M.list(cwd)
@@ -1256,6 +1257,7 @@ function M.pick()
   ui.show_interaction({
     title = 'Pi resume',
     winbar_title = 'Pi resume',
+    kind = 'resume',
     hint = 'j/k, gg/G, or search move; Enter choose, Esc cancel',
     message = 'Choose a current-directory root session tree. Selecting a root resumes its newest branch; rows are sorted by last interaction time.',
     surface = 'output',
@@ -1797,7 +1799,7 @@ local function current_directory_session_paths(root_file)
   local paths = {}
   for _, path in ipairs(vim.fn.globpath(root, '**/*.jsonl', false, true) or {}) do
     local normalized = store.normalize_path(path)
-    if normalized and not same_directory(normalized, root_dir) then
+    if normalized and not same_directory(normalized, root_dir) and not store.is_trash_path(normalized) then
       local header = read_session_header(normalized)
       if header and header.type == 'session' and store.normalize_path(header.cwd) == cwd then
         table.insert(paths, normalized)
