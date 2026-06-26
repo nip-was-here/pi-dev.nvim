@@ -255,11 +255,31 @@ function M.local_bash(command, callback)
   return true
 end
 
+local function mark_abort_idle(response)
+  if not response_is_active(response) or not response or response.success == false then
+    return
+  end
+  local data = type(response.data) == 'table' and response.data or {}
+  if data.isStreaming == true or data.active == true then
+    return
+  end
+  local runtime = response_runtime(response)
+  runtime.active = false
+  runtime.waiting_input = false
+  runtime.loading = false
+  if runtime.status ~= 'error' then
+    runtime.status = state.is_job_running(runtime) and 'idle' or 'not connected'
+  end
+  state.sync_active_rpc_runtime(runtime)
+  ui.refresh_chrome()
+end
+
 function M.abort(callback)
   require('pi-dev.extension_ui').clear_runtime_interactions(state.rpc.active_key)
   renderer.append_user_cancelled()
   return rpc.request({ type = 'abort' }, function(response)
     record_command_response(response)
+    mark_abort_idle(response)
     M.refresh_status(50)
     if callback then
       callback(response)
