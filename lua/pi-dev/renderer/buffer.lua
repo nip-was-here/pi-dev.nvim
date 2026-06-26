@@ -34,6 +34,21 @@ function M.output_has_focus(win)
   return win and vim.api.nvim_win_is_valid(win) and vim.api.nvim_get_current_win() == win
 end
 
+local function output_autoscroll_suppressed()
+  local interaction = state.ui.interaction
+  if interaction and interaction.surface ~= 'output' then
+    return true
+  end
+
+  local runtime = state.active_rpc_runtime()
+  return runtime
+    and (
+      runtime.pending_extension_ui_request ~= nil
+      or runtime.current_extension_interaction ~= nil
+      or (runtime.interaction_queue and #runtime.interaction_queue > 0)
+    )
+end
+
 local function keep_cursor_above_status_separator(win)
   local status_win = state.ui.status_win
   if not status_win or not vim.api.nvim_win_is_valid(status_win) then
@@ -65,7 +80,7 @@ function M.scroll_output_to_bottom(opts)
   if not win or not vim.api.nvim_win_is_valid(win) or not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-  if (not force and M.output_has_focus(win)) or (state.render.output_scroll_pending and not force) then
+  if not force and (M.output_has_focus(win) or output_autoscroll_suppressed() or state.render.output_scroll_pending) then
     return
   end
   if not force then
@@ -75,7 +90,10 @@ function M.scroll_output_to_bottom(opts)
     if not force then
       state.render.output_scroll_pending = false
     end
-    if not vim.api.nvim_win_is_valid(win) or not vim.api.nvim_buf_is_valid(bufnr) or (not force and M.output_has_focus(win)) then
+    if not vim.api.nvim_win_is_valid(win)
+      or not vim.api.nvim_buf_is_valid(bufnr)
+      or (not force and (M.output_has_focus(win) or output_autoscroll_suppressed()))
+    then
       return
     end
     local last = math.max(1, vim.api.nvim_buf_line_count(bufnr))

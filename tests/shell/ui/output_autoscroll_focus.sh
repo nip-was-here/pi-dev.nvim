@@ -50,6 +50,40 @@ renderer.append_system(long_text)
 vim.wait(150, function() return false end)
 local cursor = vim.api.nvim_win_get_cursor(state.ui.output_win)
 assert(cursor[1] == 1, 'output scroll/cursor should be preserved while user focuses output/session buffer: ' .. vim.inspect(cursor))
+
+vim.api.nvim_set_current_win(state.ui.input_win)
+renderer.clear('Output scroll frozen by interaction')
+renderer.append_system(long_text)
+assert(vim.wait(1000, function()
+  return vim.api.nvim_win_get_cursor(state.ui.output_win)[1] == vim.api.nvim_buf_line_count(state.ui.output_buf)
+end), 'setup should start at bottom before frozen interaction test')
+ui.show_interaction({
+  title = 'Frozen interaction',
+  kind = 'permission',
+  message = 'Choose before continuing.',
+  items = {
+    { label = 'Allow' },
+    { label = 'Deny' },
+  },
+})
+assert(state.ui.interaction ~= nil, 'interaction should be visible')
+vim.api.nvim_win_call(state.ui.output_win, function()
+  vim.api.nvim_win_set_cursor(state.ui.output_win, { 3, 0 })
+  vim.cmd('normal! zt')
+end)
+local before_cursor = vim.api.nvim_win_get_cursor(state.ui.output_win)
+local before_view = vim.api.nvim_win_call(state.ui.output_win, function()
+  return vim.fn.winsaveview()
+end)
+vim.api.nvim_set_current_win(state.ui.input_win)
+renderer.append_system('Event rendered while the lower interaction freezes normal input.')
+vim.wait(150, function() return false end)
+local after_cursor = vim.api.nvim_win_get_cursor(state.ui.output_win)
+local after_view = vim.api.nvim_win_call(state.ui.output_win, function()
+  return vim.fn.winsaveview()
+end)
+assert(after_cursor[1] == before_cursor[1], 'output cursor should not jump to bottom while interaction freezes input: before=' .. vim.inspect(before_cursor) .. ' after=' .. vim.inspect(after_cursor))
+assert(after_view.topline == before_view.topline, 'output view should not snap while interaction freezes input: before=' .. vim.inspect(before_view) .. ' after=' .. vim.inspect(after_view))
 LUA
 
 pidev_run_lua_file "$tmp_lua"
