@@ -140,7 +140,12 @@ scale_duration() {
 printf 'Running %d tests from %s\n' "${#test_files[@]}" "${ROOT_DIR##*/}"
 for test_file in "${test_files[@]}"; do
   test_name="$(relative_test_name "$test_file")"
-  test_timeout="$(scale_duration "$(timeout_for "$test_name")")"
+  if ! configured_timeout="$(timeout_for "$test_name")"; then
+    exit 1
+  fi
+  if ! test_timeout="$(scale_duration "$configured_timeout")"; then
+    exit 1
+  fi
   timeout_display="$(format_centiseconds "$(duration_centiseconds "$test_timeout")")"
   test_artifact_name="${test_name//\//__}"
 

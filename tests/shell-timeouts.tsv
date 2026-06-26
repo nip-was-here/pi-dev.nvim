@@ -15,6 +15,7 @@ config/setup_idempotency.sh	0.6s
 contracts/ascii.sh	0.6s
 contracts/local_tmp.sh	3s
 contracts/lua_syntax.sh	0.5s
+contracts/runner_missing_timeout.sh	0.5s
 docs/adr_readme_generated.sh	0.5s
 docs/public_documentation_contract.sh	0.5s
 docs/readme_config_options.sh	0.5s
@@ -128,6 +129,7 @@ tree/refork_same_step.sh	0.6s
 tree/rpc_pool_limit_popup.sh	0.6s
 tree/waiting_lower_focus.sh	0.6s
 tree/waiting_performance.sh	0.6s
+ui/abort_returns_idle.sh	0.5s
 ui/chat_naming.sh	0.5s
 ui/focus_input_normal_mode.sh	0.5s
 ui/input_active_steer.sh	0.5s
