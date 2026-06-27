@@ -273,11 +273,12 @@ local function set_input_keymaps(bufnr)
   vim.keymap.set('i', '/', function()
     local line = vim.api.nvim_get_current_line()
     local col = vim.fn.col('.') - 1
-    if line:sub(1, col):match('^%s*$') then
+    local before = line:sub(1, col)
+    if before:match('^%s*$') or before:match('^@%S*$') or before:match('%s@%S*$') then
       return '/\24\21'
     end
     return '/'
-  end, { buffer = bufnr, expr = true, desc = 'Pi.dev: slash command completion' })
+  end, { buffer = bufnr, expr = true, desc = 'Pi.dev: slash and file path completion' })
   vim.keymap.set('i', '@', function()
     local line = vim.api.nvim_get_current_line()
     local col = vim.fn.col('.') - 1

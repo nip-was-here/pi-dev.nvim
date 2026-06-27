@@ -107,6 +107,26 @@ vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'not /command' })
 vim.api.nvim_win_set_cursor(0, { 1, 12 })
 assert(completion.complete(1, '') == -3)
 vim.bo.modified = false
+
+local ui = require('pi-dev.ui')
+local state = require('pi-dev.state')
+ui.show()
+vim.api.nvim_set_current_win(state.ui.input_win)
+vim.api.nvim_buf_set_lines(state.ui.input_buf, 0, -1, false, { '@dir' })
+vim.bo[state.ui.input_buf].modified = false
+vim.api.nvim_win_set_cursor(state.ui.input_win, { 1, 4 })
+local slash_map = vim.fn.maparg('/', 'i', false, true)
+assert(type(slash_map.callback) == 'function', vim.inspect(slash_map))
+assert(slash_map.callback() == '/\24\21', vim.inspect(slash_map.callback()))
+vim.api.nvim_buf_set_lines(state.ui.input_buf, 0, -1, false, { '@dir/subdir' })
+vim.bo[state.ui.input_buf].modified = false
+vim.api.nvim_win_set_cursor(state.ui.input_win, { 1, 11 })
+assert(slash_map.callback() == '/\24\21', vim.inspect(slash_map.callback()))
+vim.api.nvim_buf_set_lines(state.ui.input_buf, 0, -1, false, { 'email@dir' })
+vim.bo[state.ui.input_buf].modified = false
+vim.api.nvim_win_set_cursor(state.ui.input_win, { 1, 9 })
+assert(slash_map.callback() == '/', vim.inspect(slash_map.callback()))
+vim.bo.modified = false
 LUA
 
 pidev_run_lua_file "$tmp_lua"
