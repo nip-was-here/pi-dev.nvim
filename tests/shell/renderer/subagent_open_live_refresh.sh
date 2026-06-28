@@ -72,8 +72,13 @@ vim.api.nvim_set_current_win(state.ui.output_win)
 vim.api.nvim_win_set_cursor(state.ui.output_win, { child_line, 0 })
 vim.cmd('PiDevSubagentOpen')
 assert(state.ui.subagent_view, 'subagent view should open while child is running')
+local parent_during = buf_text(state.ui.output_buf)
+assert(parent_during:find('**Task:** watch live child', 1, true), parent_during)
+assert(parent_during:find('first running body', 1, true) == nil, parent_during)
+
 local child_before = buf_text(state.ui.subagent_view.buf)
-assert(child_before:find('Sub%-agent result will be shown after this agent completes'), child_before)
+assert(child_before:find('first running body', 1, true), child_before)
+assert(child_before:find('Sub%-agent result will be shown after this agent completes') == nil, child_before)
 assert(child_before:find('completed child body', 1, true) == nil, child_before)
 
 renderer.handle_event({

@@ -455,7 +455,21 @@ function M.result_to_lines(source, text, opts)
           table.insert(result_lines, '_No sub-agent result was returned._')
         end
       else
-        table.insert(result_lines, '_Sub-agent result will be shown after this agent completes._')
+        if body then
+          append_body(result_lines, body, { min_heading_level = 2, max_heading_level = 6 })
+          added_result = true
+        elseif item.error then
+          append_body(result_lines, 'Error: ' .. tostring(item.error), { min_heading_level = 2, max_heading_level = 6 })
+          added_result = true
+        elseif type(progress) == 'table' and type(progress.recentOutput) == 'table' and #progress.recentOutput > 0 then
+          for _, output_line in ipairs(progress.recentOutput) do
+            append_body(result_lines, tostring(output_line), { min_heading_level = 2, max_heading_level = 6 })
+          end
+          added_result = true
+        end
+        if not added_result then
+          table.insert(result_lines, '_Sub-agent has not produced output yet._')
+        end
       end
 
       local title = buffer_title(label)
