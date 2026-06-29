@@ -1,5 +1,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- Copyright (c) 2026 nip
+local message_content = require('pi-dev.message_content')
 local pipeline = require('pi-dev.render_pipeline')
 
 local M = {}
@@ -325,6 +326,194 @@ local function child_buffer_lines(title, main_info, result_lines, status)
   return lines
 end
 
+local function tool_call_id(item)
+  if type(item) ~= 'table' then
+    return nil
+  end
+  local id = item.id or item.toolCallId or item.tool_call_id or item.callId or item.toolUseId or item.tool_use_id
+  return id ~= nil and id ~= '' and tostring(id) or nil
+end
+
+local function tool_result_id(message)
+  if type(message) ~= 'table' then
+    return nil
+  end
+  local id = message.toolCallId or message.tool_call_id or message.callId or message.toolUseId or message.tool_use_id or message.id
+  return id ~= nil and id ~= '' and tostring(id) or nil
+end
+
+local function is_tool_call_item(item)
+  local kind = type(item) == 'table' and item.type or nil
+  return kind == 'toolCall' or kind == 'tool_call' or kind == 'tool_use' or kind == 'function_call'
+end
+
+local function tool_call_name(item)
+  if type(item) ~= 'table' then
+    return 'tool'
+  end
+  local fn = type(item['function']) == 'table' and item['function'] or {}
+  return tostring(item.name or item.toolName or item.tool_name or fn.name or 'tool')
+end
+
+local function tool_call_args(item)
+  if type(item) ~= 'table' then
+    return nil
+  end
+  local fn = type(item['function']) == 'table' and item['function'] or {}
+  return item.arguments or item.args or item.input or item.parameters or fn.arguments
+end
+
+local function append_value_lines(lines, value, lang)
+  if value == nil or value == vim.NIL then
+    return
+  end
+  if type(value) == 'string' then
+    local text = normalize_line_endings(value)
+    if vim.trim(text) == '' then
+      return
+    end
+    vim.list_extend(lines, fenced_lines(lang or '', text, { trim_final_empty = true }))
+    return
+  end
+  local ok, encoded = pcall(vim.json.encode, value)
+  vim.list_extend(lines, fenced_lines('json', ok and encoded or vim.inspect(value), { trim_final_empty = true }))
+end
+
+local function message_text(message, opts)
+  opts = opts or {}
+  if type(message) ~= 'table' then
+    return ''
+  end
+  return message_content.message_render_text(message, opts)
+end
+
+local function append_message_block(lines, title, text, opts)
+  text = normalize_line_endings(text or '')
+  if vim.trim(text) == '' then
+    return false
+  end
+  if #lines > 0 and lines[#lines] ~= '' then
+    table.insert(lines, '')
+  end
+  table.insert(lines, '## ' .. title)
+  append_wrapped_text(lines, text, opts or { min_heading_level = 3, max_heading_level = 6 })
+  return true
+end
+
+local function append_tool_transcript_block(lines, name, args, result_text, status)
+  if #lines > 0 and lines[#lines] ~= '' then
+    table.insert(lines, '')
+  end
+  table.insert(lines, '### Tool: ' .. tostring(name or 'tool'))
+  if status and status ~= '' then
+    table.insert(lines, '_' .. status .. '_')
+  end
+  if args ~= nil then
+    table.insert(lines, '')
+    table.insert(lines, '#### Input')
+    append_value_lines(lines, args, name == 'bash' and 'bash' or '')
+  end
+  if result_text and vim.trim(normalize_line_endings(result_text)) ~= '' then
+    table.insert(lines, '')
+    table.insert(lines, '#### Output')
+    append_wrapped_text(lines, result_text, { min_heading_level = 5, max_heading_level = 6 })
+  end
+end
+
+local function result_text_from_message(message)
+  if type(message) ~= 'table' then
+    return ''
+  end
+  local text = message_text(message, { skip_tool_calls = true })
+  if vim.trim(text) ~= '' then
+    return text
+  end
+  for _, field in ipairs({ 'output', 'text', 'result', 'response', 'data' }) do
+    local value = message[field]
+    if type(value) == 'string' and vim.trim(value) ~= '' then
+      return value
+    elseif type(value) == 'table' then
+      local ok, encoded = pcall(vim.json.encode, value)
+      return ok and encoded or vim.inspect(value)
+    end
+  end
+  return ''
+end
+
+local function transcript_lines_from_progress(progress)
+  if type(progress) ~= 'table' then
+    return nil
+  end
+  local lines = {}
+  local recent = type(progress.recentTools) == 'table' and progress.recentTools or {}
+  for _, tool in ipairs(recent) do
+    if type(tool) == 'table' then
+      append_tool_transcript_block(lines, tool.tool or tool.name or 'tool', tool.args, nil, 'done')
+    end
+  end
+  if progress.status == 'running' and progress.currentTool then
+    append_tool_transcript_block(lines, progress.currentTool, progress.currentToolArgs or progress.currentPath, nil, 'run')
+  end
+  if type(progress.recentOutput) == 'table' and #progress.recentOutput > 0 then
+    append_message_block(lines, 'Assistant', table.concat(progress.recentOutput, '\n'))
+  end
+  return #lines > 0 and lines or nil
+end
+
+local function transcript_lines_from_messages(messages, progress)
+  if type(messages) ~= 'table' or #messages == 0 then
+    return nil
+  end
+  local result_by_id = {}
+  for _, message in ipairs(messages) do
+    if type(message) == 'table' and message.role == 'toolResult' then
+      local id = tool_result_id(message)
+      if id then
+        result_by_id[id] = message
+      end
+    end
+  end
+
+  local lines = {}
+  local rendered_results = {}
+  for _, message in ipairs(messages) do
+    if type(message) == 'table' and message.role == 'user' then
+      append_message_block(lines, 'User', message_text(message, { skip_tool_calls = true }))
+    elseif type(message) == 'table' and message.role == 'assistant' then
+      append_message_block(lines, 'Assistant', message_text(message, { skip_tool_calls = true }))
+      if type(message.content) == 'table' then
+        for _, item in ipairs(message.content) do
+          if is_tool_call_item(item) then
+            local id = tool_call_id(item)
+            local result_message = id and result_by_id[id] or nil
+            if result_message then
+              rendered_results[id] = true
+            end
+            append_tool_transcript_block(lines, tool_call_name(item), tool_call_args(item), result_text_from_message(result_message), result_message and 'done' or 'run')
+          end
+        end
+      end
+    elseif type(message) == 'table' and message.role == 'toolResult' then
+      local id = tool_result_id(message)
+      if not (id and rendered_results[id]) then
+        append_tool_transcript_block(lines, 'tool', nil, result_text_from_message(message), 'done')
+      end
+    elseif type(message) == 'table' then
+      local role = tostring(message.role or message.type or 'Message')
+      append_message_block(lines, role:sub(1, 1):upper() .. role:sub(2), message_text(message, { skip_tool_calls = true }))
+    end
+  end
+
+  if type(progress) == 'table' and progress.status == 'running' and progress.currentTool then
+    append_tool_transcript_block(lines, progress.currentTool, progress.currentToolArgs or progress.currentPath, nil, 'run')
+  end
+  if type(progress) == 'table' and progress.status == 'running' and type(progress.recentOutput) == 'table' and #progress.recentOutput > 0 then
+    append_message_block(lines, 'Assistant', table.concat(progress.recentOutput, '\n'))
+  end
+
+  return #lines > 0 and lines or nil
+end
+
 function M.is_tool(tool_name)
   local lower = tostring(tool_name or ''):lower()
   return lower == 'agent' or lower:find('subagent', 1, true) ~= nil or lower:match('[_%-]agent$') ~= nil
@@ -433,10 +622,10 @@ function M.result_to_lines(source, text, opts)
 
       local body = first_string_field(item, { 'response', 'output', 'text', 'summary', 'final', 'finalOutput', 'finalResult', 'final_result', 'final_output', 'message' })
       local show_result = result_available(status, opts)
-      local result_lines = {}
-      local added_result = false
+      local result_lines = transcript_lines_from_messages(item.messages, progress) or transcript_lines_from_progress(progress) or {}
+      local added_result = #result_lines > 0
       if show_result then
-        if body then
+        if not added_result and body then
           append_body(result_lines, body, { min_heading_level = 2, max_heading_level = 6 })
           added_result = true
         elseif item.error then
@@ -455,7 +644,7 @@ function M.result_to_lines(source, text, opts)
           table.insert(result_lines, '_No sub-agent result was returned._')
         end
       else
-        if body then
+        if not added_result and body then
           append_body(result_lines, body, { min_heading_level = 2, max_heading_level = 6 })
           added_result = true
         elseif item.error then
