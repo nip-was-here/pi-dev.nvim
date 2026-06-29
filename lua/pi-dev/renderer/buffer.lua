@@ -75,9 +75,13 @@ end
 function M.scroll_output_to_bottom(opts)
   opts = opts or {}
   local force = opts.force == true
+  local preserve_output_focus = opts.preserve_output_focus == true
   local win = state.ui.output_win
   local bufnr = M.output_buf()
   if not win or not vim.api.nvim_win_is_valid(win) or not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  if preserve_output_focus and M.output_has_focus(win) then
     return
   end
   if not force and (M.output_has_focus(win) or output_autoscroll_suppressed() or state.render.output_scroll_pending) then
@@ -92,6 +96,7 @@ function M.scroll_output_to_bottom(opts)
     end
     if not vim.api.nvim_win_is_valid(win)
       or not vim.api.nvim_buf_is_valid(bufnr)
+      or (preserve_output_focus and M.output_has_focus(win))
       or (not force and (M.output_has_focus(win) or output_autoscroll_suppressed()))
     then
       return

@@ -38,6 +38,7 @@ permissions/opens_tool_fold.sh	0.5s
 permissions/request_truncation.sh	0.5s
 permissions/wait_timer_duration.sh	0.5s
 permissions/restored_full_bash.sh	0.5s
+permissions/scroll_bottom.sh	0.6s
 permissions/session_detail_dedupe.sh	0.6s
 permissions/subagent_permission_parent_mirror.sh	0.6s
 renderer/agent_tool_heading_nesting.sh	0.5s
