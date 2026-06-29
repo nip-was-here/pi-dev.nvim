@@ -611,6 +611,7 @@ end
 local function append_permission_request(request, summary)
   renderer.append_permission_request(request.id, summary, M.detail_lines(request), {
     timestamp = request.timestamp or request.createdAt or request.created_at or request.time or request.date,
+    scroll_to_bottom_if_unfocused = true,
   })
 end
 

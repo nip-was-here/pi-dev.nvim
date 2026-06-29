@@ -1931,6 +1931,9 @@ function M.append_permission_request(id, summary, details, opts)
   if schedule_permission_timer then
     schedule_permission_timer(id)
   end
+  if opts.scroll_to_bottom_if_unfocused == true then
+    scroll_output_to_bottom({ force = true, preserve_output_focus = true })
+  end
   return id
 end
 
