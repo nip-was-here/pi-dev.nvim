@@ -941,6 +941,28 @@ local function child_agent_action(child)
   return action ~= '' and action or 'idle'
 end
 
+local terminal_subagent_statuses = {
+  ['cancelled'] = true,
+  ['canceled'] = true,
+  ['complete'] = true,
+  ['completed'] = true,
+  ['done'] = true,
+  ['error'] = true,
+  ['failed'] = true,
+  ['failure'] = true,
+  ['interrupted'] = true,
+  ['success'] = true,
+  ['succeeded'] = true,
+  ['timed out'] = true,
+  ['timeout'] = true,
+}
+
+local function subagent_tree_child_active(child)
+  local status = child and child.status or nil
+  status = vim.trim(tostring(status or '')):lower()
+  return status == '' or not terminal_subagent_statuses[status]
+end
+
 local function subagent_tree_label(prefix, name, action, max_width)
   local text = tostring(prefix or '') .. tostring(name or 'agent') .. ' - ' .. tostring(action or '')
   return format.truncate_display(text, math.max(1, tonumber(max_width) or 80))
@@ -967,21 +989,25 @@ local function subagent_tree_items()
   if #blocks == 0 then
     return {}
   end
-  local items = {
-    { kind = 'root', name = 'root-agent', action = root_agent_action() },
-  }
+  local items = {}
   for _, item in ipairs(blocks) do
     for _, child in ipairs(item.block.subagent_children or {}) do
-      local copy = vim.deepcopy(child)
-      copy.parent_tool_call_id = item.id
-      table.insert(items, {
-        kind = 'subagent',
-        name = child_agent_name(copy),
-        action = child_agent_action(copy),
-        child = copy,
-      })
+      if subagent_tree_child_active(child) then
+        local copy = vim.deepcopy(child)
+        copy.parent_tool_call_id = item.id
+        table.insert(items, {
+          kind = 'subagent',
+          name = child_agent_name(copy),
+          action = child_agent_action(copy),
+          child = copy,
+        })
+      end
     end
   end
+  if #items == 0 then
+    return {}
+  end
+  table.insert(items, 1, { kind = 'root', name = 'root-agent', action = root_agent_action() })
   return items
 end
 
