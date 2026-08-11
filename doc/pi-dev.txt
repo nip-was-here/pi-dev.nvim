@@ -111,11 +111,12 @@ Pi panel ~
   manual resizing is preserved.
 
 Agent tree surface ~
-  A compact tree shown above the chat only while subagents exist. It lists the
-  root agent and child subagents with each agent's current action. The window is
-  capped at eight rows. Press `Return` on a row to switch the chat to the root
-  agent or selected subagent. Session, tree, and waiting pickers replace the
-  agent tree and chat while they are open.
+  A compact tree shown above the chat only while subagents are running. It lists
+  the root agent and active child subagents with each agent's current action.
+  Completed subagents stay available from their chat blocks, not this tree. The
+  window is capped at eight rows. Press `Return` on a row to switch the chat to
+  the root agent or selected active subagent. Session, tree, and waiting pickers
+  replace the agent tree and chat while they are open.
 
 Output surface ~
   The read-oriented buffer for conversation, Pi responses, restored history,
@@ -433,14 +434,15 @@ Waiting navigation ~
 
 Focused subagent buffers ~
   Subagent tool output in the parent chat keeps only each child run's main
-  information. While at least one subagent exists, pi-dev.nvim opens a compact
-  agent tree above the chat. Each row contains the agent name and its current
-  action. Press `Return` on `root-agent` to show the root chat, or on a child row
-  to show that subagent chat. The tree is hidden when no subagents exist and is
-  capped at eight rows.
+  information. While at least one subagent is running, pi-dev.nvim opens a
+  compact agent tree above the chat. Each row contains the agent name and its
+  current action. Press `Return` on `root-agent` to show the root chat, or on an
+  active child row to show that subagent chat. The tree is hidden when no
+  subagents are running and is capped at eight rows. Completed subagents do not
+  appear in the tree.
 
-  To inspect a child result from the chat, put the cursor anywhere in that child
-  subagent block and run `:PiDevSubagentOpen`, `/subagent-open`, or
+  To inspect any child result from the chat, put the cursor anywhere in that
+  child subagent block and run `:PiDevSubagentOpen`, `/subagent-open`, or
   `<leader>a]`. The output surface switches to an isolated buffer titled like
   `Pi chat subagent (deep N): ...`.
 
