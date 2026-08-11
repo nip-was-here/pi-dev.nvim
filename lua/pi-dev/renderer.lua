@@ -1228,6 +1228,9 @@ local function replace_tool_block(tool_call_id, lines, opts)
     if ok and ui.refresh_subagent_view_from_parent then
       ui.refresh_subagent_view_from_parent(tool_call_id, block.subagent_children)
     end
+    if ok and ui.refresh_subagent_tree then
+      ui.refresh_subagent_tree()
+    end
   end
   refresh_rendered_output()
 end
@@ -1497,8 +1500,13 @@ local function close_subagent_views_for_parent_render()
   local ok, ui = pcall(require, 'pi-dev.ui')
   if ok and ui.close_all_subagent_views then
     ui.close_all_subagent_views({ restore_buffer = false, restore_title = false })
+    if ui.close_subagent_tree then
+      ui.close_subagent_tree()
+    end
   else
     state.ui.subagent_view = nil
+    state.ui.subagent_tree_items = {}
+    state.ui.subagent_tree_win = nil
   end
 end
 

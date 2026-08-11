@@ -110,6 +110,13 @@ Pi panel ~
   RPC runtimes. `<C-W>=` restores the configured right-panel width; ordinary
   manual resizing is preserved.
 
+Agent tree surface ~
+  A compact tree shown above the chat only while subagents exist. It lists the
+  root agent and child subagents with each agent's current action. The window is
+  capped at eight rows. Press `Return` on a row to switch the chat to the root
+  agent or selected subagent. Session, tree, and waiting pickers replace the
+  agent tree and chat while they are open.
+
 Output surface ~
   The read-oriented buffer for conversation, Pi responses, restored history,
   tool output, service notices, permission objects, errors, large tree/waiting
@@ -419,7 +426,13 @@ Waiting navigation ~
 
 Focused subagent buffers ~
   Subagent tool output in the parent chat keeps only each child run's main
-  information. To inspect a child result, put the cursor anywhere in that child
+  information. While at least one subagent exists, pi-dev.nvim opens a compact
+  agent tree above the chat. Each row contains the agent name and its current
+  action. Press `Return` on `root-agent` to show the root chat, or on a child row
+  to show that subagent chat. The tree is hidden when no subagents exist and is
+  capped at eight rows.
+
+  To inspect a child result from the chat, put the cursor anywhere in that child
   subagent block and run `:PiDevSubagentOpen`, `/subagent-open`, or
   `<leader>a]`. The output surface switches to an isolated buffer titled like
   `Pi chat subagent (deep N): ...`.
@@ -429,7 +442,8 @@ Focused subagent buffers ~
   `:PiDevSubagentParent`, `/subagent-parent`, or `<leader>a[`. Focused subagent
   buffers are not included in runtime cycling, tree navigation, or waiting
   branch lists. Branch-runtime switches close focused subagent buffers to keep
-  runtime views isolated.
+  runtime views isolated. Session, tree, and waiting pickers replace the agent
+  tree and chat while they are open.
 
   If a permission request arrives while a subagent is running, the parent/root
   chat mirrors the permission request block under the corresponding subagent
@@ -469,9 +483,9 @@ Generic extension UI ~
 Compatibility layers ~
   pi-dev.nvim provides plugin-specific native compatibility for:
 
-  - `pi-subagents`: compact parent-chat summaries, focused subagent buffers,
-    nested subagent titles, and parent/root permission mirroring for subagent
-    permission requests.
+  - `pi-subagents`: compact parent-chat summaries, active-subagent tree,
+    focused subagent buffers, nested subagent titles, and parent/root permission
+    mirroring for subagent permission requests.
   - `@gotgenes/pi-permission-system`: native permission prompts, folded
     permission details in the output surface, exact option-value responses, and
     denial-reason follow-up prompts.

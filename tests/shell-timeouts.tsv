@@ -150,3 +150,4 @@ waiting/default_runtime_tree_link.sh	0.5s
 waiting/empty_notify.sh	0.5s
 waiting/live_runtime_interactions.sh	0.5s
 waiting/navigation.sh	0.6s
+renderer/subagent_tree_panel.sh	0.6s

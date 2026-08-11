@@ -606,6 +606,16 @@ function M.result_to_lines(source, text, opts)
 
       local main_info = { '## Main info' }
       local task = first_present_field(item, { 'task', 'prompt', 'request' })
+      local current_action = nil
+      if type(progress) == 'table' and progress.currentTool then
+        current_action = tostring(progress.currentTool)
+        if progress.currentPath then
+          current_action = current_action .. ' ' .. tostring(progress.currentPath)
+        elseif progress.currentToolArgs then
+          current_action = current_action .. ' ' .. compact_header_text(progress.currentToolArgs, 80)
+        end
+      end
+      current_action = current_action or (task and compact_header_text(task, 100)) or status
       if task then
         local task_line = '**Task:** ' .. compact_header_text(task, 160)
         table.insert(lines, task_line)
@@ -666,6 +676,9 @@ function M.result_to_lines(source, text, opts)
         header = header,
         label = label,
         title = title,
+        agent = agent,
+        status = status,
+        action = current_action,
         lines = child_buffer_lines(title, main_info, result_lines, status),
       })
     else
@@ -685,6 +698,9 @@ function M.result_to_lines(source, text, opts)
         header = header,
         label = label,
         title = label,
+        agent = label,
+        status = nil,
+        action = 'result',
         lines = child_buffer_lines(label, { '## Main info' }, result_lines),
       })
     end
@@ -705,6 +721,9 @@ function M.raw_text_parent_lines(text)
       header = '##### subagent',
       label = 'subagent',
       title = 'subagent',
+      agent = 'subagent',
+      status = 'completed',
+      action = 'completed',
       lines = child_buffer_lines('subagent', { '## Main info' }, result_lines, 'completed'),
     },
   }
