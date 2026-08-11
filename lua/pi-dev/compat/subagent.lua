@@ -516,7 +516,10 @@ end
 
 function M.is_tool(tool_name)
   local lower = tostring(tool_name or ''):lower()
-  return lower == 'agent' or lower:find('subagent', 1, true) ~= nil or lower:match('[_%-]agent$') ~= nil
+  return lower == 'agent'
+    or lower == 'subagent'
+    or lower:match('[_%-]agent$') ~= nil
+    or lower:match('[_%-]subagent$') ~= nil
 end
 
 function M.summary(args)
