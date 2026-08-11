@@ -28,7 +28,7 @@ local valid_win = buffers.valid_win
 local valid_buf = buffers.valid_buf
 
 local function is_pi_win(win)
-  return win == state.ui.output_win or win == state.ui.input_win or win == state.ui.status_win
+  return win == state.ui.output_win or win == state.ui.input_win or win == state.ui.subagent_tree_win or win == state.ui.status_win
 end
 
 local function is_pi_buf(buf)
@@ -36,6 +36,7 @@ local function is_pi_buf(buf)
     or buf == state.ui.input_buf
     or buf == state.ui.interaction_buf
     or buf == state.ui.tree_buf
+    or buf == state.ui.subagent_tree_buf
     or buf == state.ui.status_buf
 end
 
@@ -349,6 +350,9 @@ local function apply_configured_panel_dimensions()
   if valid_win(state.ui.output_win) and opts.position ~= 'bottom' then
     local width = size_arg(opts.width, vim.o.columns)
     pcall(vim.api.nvim_win_set_width, state.ui.output_win, width)
+    if valid_win(state.ui.subagent_tree_win) then
+      pcall(vim.api.nvim_win_set_width, state.ui.subagent_tree_win, width)
+    end
     if valid_win(state.ui.input_win) then
       pcall(vim.api.nvim_win_set_width, state.ui.input_win, width)
     end
@@ -430,6 +434,7 @@ function M.remember_file_window(win)
 end
 
 function M.guard_panel_buffers()
+  restore_panel_buffer(state.ui.subagent_tree_win, state.ui.subagent_tree_buf)
   restore_panel_buffer(state.ui.output_win, output_surface_buf())
   restore_panel_buffer(state.ui.input_win, lower_buf())
   restore_panel_buffer(state.ui.status_win, state.ui.status_buf)
@@ -499,10 +504,12 @@ function M.refresh_chrome()
   set_abort_keymap(state.ui.input_buf)
   set_abort_keymap(state.ui.interaction_buf)
   set_abort_keymap(state.ui.tree_buf)
+  set_abort_keymap(state.ui.subagent_tree_buf)
   set_abort_keymap(state.ui.status_buf)
   set_fold_keymaps(state.ui.output_buf)
   set_fold_keymaps(state.ui.interaction_buf)
   set_fold_keymaps(state.ui.tree_buf)
+  M.refresh_subagent_tree()
   M.guard_panel_buffers()
   preserve_manual_panel_dimensions()
   if valid_win(state.ui.output_win) then
@@ -592,6 +599,9 @@ function M.hide()
   if valid_win(state.ui.status_win) then
     pcall(vim.api.nvim_win_close, state.ui.status_win, true)
   end
+  if valid_win(state.ui.subagent_tree_win) then
+    pcall(vim.api.nvim_win_close, state.ui.subagent_tree_win, true)
+  end
   if valid_win(state.ui.input_win) then
     pcall(vim.api.nvim_win_close, state.ui.input_win, true)
   end
@@ -600,6 +610,7 @@ function M.hide()
   end
   state.ui.input_win = nil
   state.ui.output_win = nil
+  state.ui.subagent_tree_win = nil
   state.ui.status_win = nil
   state.ui.visible = false
   panel_teardown = false
@@ -615,6 +626,10 @@ function M.handle_window_closed(win)
   end
   if win == state.ui.status_win then
     state.ui.status_win = nil
+    return true
+  end
+  if win == state.ui.subagent_tree_win then
+    state.ui.subagent_tree_win = nil
     return true
   end
   if panel_teardown or not state.ui.visible then
@@ -868,6 +883,217 @@ local function set_buffer_lines(bufnr, lines, filetype)
   return true
 end
 
+local function open_subagent_child(child)
+  if not child then
+    return false
+  end
+  local parent_view = state.ui.subagent_view
+  local depth = (parent_view and parent_view.depth or 0) + 1
+  local view = {
+    parent_view = parent_view,
+    parent_title = parent_view and parent_view.output_title or state.ui.output_title,
+    depth = depth,
+    title = child.title or child.label or 'subagent',
+    parent_tool_call_id = child.parent_tool_call_id,
+    child_header = child.header,
+  }
+  view.output_title = subagent.title_text(view.title, depth)
+  local bufnr_new = subagent.ensure_view_buffer(view, state.ui, buffers.setup_buffer, config.options.ui.output_filetype)
+  set_buffer_lines(bufnr_new, subagent.replace_title(child.lines or {}, view.title, depth), config.options.ui.output_filetype)
+  state.ui.subagent_view = view
+  state.ui.output_title = view.output_title
+  M.show()
+  if valid_win(state.ui.output_win) then
+    unlock_window_buffer(state.ui.output_win)
+    pcall(vim.api.nvim_win_set_buf, state.ui.output_win, bufnr_new)
+    lock_window_buffer(state.ui.output_win)
+    pcall(vim.api.nvim_set_current_win, state.ui.output_win)
+  end
+  M.refresh_chrome()
+  return true
+end
+
+local function root_agent_action()
+  local info = state.statusline or {}
+  if info.waiting_input then
+    return 'waiting input'
+  end
+  if info.active then
+    return tostring(info.status or 'running')
+  end
+  if info.loading then
+    return 'loading'
+  end
+  return tostring(info.status or state.ui.output_title or 'idle')
+end
+
+local function child_agent_name(child)
+  local name = child and (child.agent or child.title or child.label) or 'subagent'
+  name = tostring(name or 'subagent')
+  name = name:gsub('^Agent%s+%d+/%d+:%s*', ''):gsub('%s+%-%s+.+$', '')
+  name = vim.trim(name)
+  return name ~= '' and name or 'subagent'
+end
+
+local function child_agent_action(child)
+  local action = child and (child.action or child.status) or nil
+  action = vim.trim(tostring(action or ''))
+  return action ~= '' and action or 'idle'
+end
+
+local function subagent_tree_label(prefix, name, action, max_width)
+  local text = tostring(prefix or '') .. tostring(name or 'agent') .. ' - ' .. tostring(action or '')
+  return format.truncate_display(text, math.max(1, tonumber(max_width) or 80))
+end
+
+local function sorted_subagent_blocks()
+  local blocks = {}
+  for id, block in pairs(state.render.tool_blocks or {}) do
+    if type(block) == 'table' and type(block.subagent_children) == 'table' and #block.subagent_children > 0 then
+      table.insert(blocks, { id = id, block = block })
+    end
+  end
+  table.sort(blocks, function(a, b)
+    return (a.block.start_line or 0) < (b.block.start_line or 0)
+  end)
+  return blocks
+end
+
+local function subagent_tree_items()
+  if state.ui.interaction and state.ui.interaction.surface == 'output' then
+    return {}
+  end
+  local blocks = sorted_subagent_blocks()
+  if #blocks == 0 then
+    return {}
+  end
+  local items = {
+    { kind = 'root', name = 'root-agent', action = root_agent_action() },
+  }
+  for _, item in ipairs(blocks) do
+    for _, child in ipairs(item.block.subagent_children or {}) do
+      local copy = vim.deepcopy(child)
+      copy.parent_tool_call_id = item.id
+      table.insert(items, {
+        kind = 'subagent',
+        name = child_agent_name(copy),
+        action = child_agent_action(copy),
+        child = copy,
+      })
+    end
+  end
+  return items
+end
+
+local function set_subagent_tree_keymaps(bufnr)
+  if not valid_buf(bufnr) then
+    return
+  end
+  vim.keymap.set('n', '<CR>', function()
+    require('pi-dev.ui').select_subagent_tree_item()
+  end, { buffer = bufnr, silent = true, desc = 'Pi.dev: switch agent chat' })
+end
+
+local function set_subagent_tree_options(win)
+  if not valid_win(win) then
+    return
+  end
+  vim.wo[win].wrap = false
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].cursorline = true
+  vim.wo[win].foldcolumn = '0'
+  vim.wo[win].signcolumn = 'no'
+  pcall(function()
+    vim.wo[win].winfixheight = true
+  end)
+  set_window_title(win, ' Pi agents ')
+  lock_window_buffer(win)
+end
+
+local function close_subagent_tree_window()
+  if valid_win(state.ui.subagent_tree_win) then
+    pcall(vim.api.nvim_win_close, state.ui.subagent_tree_win, true)
+  end
+  state.ui.subagent_tree_win = nil
+end
+
+function M.close_subagent_tree()
+  state.ui.subagent_tree_items = {}
+  close_subagent_tree_window()
+  if valid_buf(state.ui.subagent_tree_buf) then
+    set_buffer_lines(state.ui.subagent_tree_buf, {}, 'text')
+  end
+  return true
+end
+
+function M.refresh_subagent_tree()
+  ensure_buffers()
+  local items = subagent_tree_items()
+  state.ui.subagent_tree_items = items
+  if #items == 0 or not state.ui.visible or not valid_win(state.ui.output_win) then
+    close_subagent_tree_window()
+    if valid_buf(state.ui.subagent_tree_buf) then
+      set_buffer_lines(state.ui.subagent_tree_buf, {}, 'text')
+    end
+    return false
+  end
+
+  local width = valid_win(state.ui.output_win) and format.window_text_width(state.ui.output_win, vim.o.columns) or vim.o.columns
+  local lines = {}
+  local active_header = state.ui.subagent_view and state.ui.subagent_view.child_header or nil
+  for _, item in ipairs(items) do
+    local active = false
+    if item.kind == 'root' then
+      active = state.ui.subagent_view == nil
+    elseif item.child and active_header then
+      active = item.child.header == active_header
+    end
+    table.insert(lines, subagent_tree_label(active and '> ' or '  ', item.name, item.action, width))
+  end
+  set_buffer_lines(state.ui.subagent_tree_buf, lines, 'text')
+  set_subagent_tree_keymaps(state.ui.subagent_tree_buf)
+
+  local height = math.min(8, math.max(1, #lines))
+  if valid_win(state.ui.subagent_tree_win) then
+    if vim.api.nvim_win_get_buf(state.ui.subagent_tree_win) ~= state.ui.subagent_tree_buf then
+      unlock_window_buffer(state.ui.subagent_tree_win)
+      pcall(vim.api.nvim_win_set_buf, state.ui.subagent_tree_win, state.ui.subagent_tree_buf)
+      lock_window_buffer(state.ui.subagent_tree_win)
+    end
+    pcall(vim.api.nvim_win_set_height, state.ui.subagent_tree_win, height)
+    set_subagent_tree_options(state.ui.subagent_tree_win)
+    return true
+  end
+
+  local previous_win = vim.api.nvim_get_current_win()
+  pcall(vim.api.nvim_win_call, state.ui.output_win, function()
+    vim.cmd('aboveleft ' .. tostring(height) .. 'split')
+    state.ui.subagent_tree_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(state.ui.subagent_tree_win, state.ui.subagent_tree_buf)
+    set_subagent_tree_options(state.ui.subagent_tree_win)
+  end)
+  if valid_win(previous_win) then
+    pcall(vim.api.nvim_set_current_win, previous_win)
+  end
+  return valid_win(state.ui.subagent_tree_win)
+end
+
+function M.select_subagent_tree_item()
+  local item = state.ui.subagent_tree_items and state.ui.subagent_tree_items[vim.api.nvim_win_get_cursor(0)[1]] or nil
+  if not item then
+    return false
+  end
+  if item.kind == 'root' then
+    M.close_all_subagent_views()
+    if valid_win(state.ui.output_win) then
+      pcall(vim.api.nvim_set_current_win, state.ui.output_win)
+    end
+    return true
+  end
+  return open_subagent_child(item.child)
+end
+
 function M.close_subagent_view(opts)
   opts = opts or {}
   local view = state.ui.subagent_view
@@ -962,30 +1188,7 @@ function M.open_subagent_at_cursor()
     vim.notify('No subagent block under cursor.', vim.log.levels.INFO)
     return false
   end
-  local parent_view = state.ui.subagent_view
-  local depth = (parent_view and parent_view.depth or 0) + 1
-  local view = {
-    parent_view = parent_view,
-    parent_title = parent_view and parent_view.output_title or state.ui.output_title,
-    depth = depth,
-    title = child.title or child.label or 'subagent',
-    parent_tool_call_id = child.parent_tool_call_id,
-    child_header = child.header,
-  }
-  view.output_title = subagent.title_text(view.title, depth)
-  local bufnr_new = subagent.ensure_view_buffer(view, state.ui, buffers.setup_buffer, config.options.ui.output_filetype)
-  set_buffer_lines(bufnr_new, subagent.replace_title(child.lines or {}, view.title, depth), config.options.ui.output_filetype)
-  state.ui.subagent_view = view
-  state.ui.output_title = view.output_title
-  M.show()
-  if valid_win(state.ui.output_win) then
-    unlock_window_buffer(state.ui.output_win)
-    pcall(vim.api.nvim_win_set_buf, state.ui.output_win, bufnr_new)
-    lock_window_buffer(state.ui.output_win)
-    pcall(vim.api.nvim_set_current_win, state.ui.output_win)
-  end
-  M.refresh_chrome()
-  return true
+  return open_subagent_child(child)
 end
 
 function M.return_to_parent_subagent()

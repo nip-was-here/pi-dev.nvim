@@ -86,6 +86,14 @@ function M.ensure()
     M.set_modifiable(state.ui.tree_buf, false)
   end
 
+  if not M.valid_buf(state.ui.subagent_tree_buf) then
+    state.ui.subagent_tree_buf = vim.api.nvim_create_buf(false, true)
+    M.setup_buffer(state.ui.subagent_tree_buf, 'text')
+    vim.api.nvim_buf_set_name(state.ui.subagent_tree_buf, 'pi-dev://agents')
+    vim.api.nvim_buf_set_lines(state.ui.subagent_tree_buf, 0, -1, false, {})
+    M.set_modifiable(state.ui.subagent_tree_buf, false)
+  end
+
   if not M.valid_buf(state.ui.status_buf) then
     state.ui.status_buf = vim.api.nvim_create_buf(false, true)
     M.setup_buffer(state.ui.status_buf, 'markdown')
