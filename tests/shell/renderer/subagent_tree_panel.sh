@@ -33,6 +33,34 @@ local function feed_return()
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'xt', false)
 end
 
+local function single_completed_subagent_payload()
+  return {
+    details = {
+      results = {
+        {
+          agent = 'reviewer',
+          status = 'completed',
+          task = 'review tree panel',
+          output = 'review complete',
+        },
+      },
+    },
+  }
+end
+
+local function many_subagents_payload(count)
+  local results = {}
+  for index = 1, count do
+    table.insert(results, {
+      agent = 'worker-' .. tostring(index),
+      status = 'completed',
+      task = 'complete item ' .. tostring(index),
+      output = 'done',
+    })
+  end
+  return { details = { results = results } }
+end
+
 local function subagent_payload()
   return {
     details = {
@@ -68,6 +96,44 @@ assert(not valid_win(state.ui.subagent_tree_win), 'agent tree must stay hidden w
 
 renderer.handle_event({
   type = 'tool_execution_start',
+  toolCallId = 'single-subagent-tree',
+  toolName = 'subagent',
+  args = { tasks = { { agent = 'reviewer' } } },
+})
+renderer.handle_event({
+  type = 'tool_execution_update',
+  toolCallId = 'single-subagent-tree',
+  toolName = 'subagent',
+  partialResult = single_completed_subagent_payload(),
+})
+renderer.flush_pending_tool_renders()
+assert(valid_win(state.ui.subagent_tree_win), 'agent tree should appear for one completed subagent')
+local single_tree_height = vim.api.nvim_win_get_height(state.ui.subagent_tree_win)
+assert(single_tree_height == 4, 'one root plus one subagent should get two extra rows, got ' .. tostring(single_tree_height))
+renderer.clear('after single subagent tree')
+assert(not valid_win(state.ui.subagent_tree_win), 'single subagent cleanup should close the agent tree')
+
+renderer.handle_event({
+  type = 'tool_execution_start',
+  toolCallId = 'capped-subagent-tree',
+  toolName = 'subagent',
+  args = { tasks = {} },
+})
+renderer.handle_event({
+  type = 'tool_execution_update',
+  toolCallId = 'capped-subagent-tree',
+  toolName = 'subagent',
+  partialResult = many_subagents_payload(10),
+})
+renderer.flush_pending_tool_renders()
+assert(valid_win(state.ui.subagent_tree_win), 'agent tree should appear for many subagents')
+local capped_tree_height = vim.api.nvim_win_get_height(state.ui.subagent_tree_win)
+assert(capped_tree_height == 8, 'many subagents should cap the tree at eight rows, got ' .. tostring(capped_tree_height))
+renderer.clear('after capped subagent tree')
+assert(not valid_win(state.ui.subagent_tree_win), 'capped subagent cleanup should close the agent tree')
+
+renderer.handle_event({
+  type = 'tool_execution_start',
   toolCallId = 'subagent-tree',
   toolName = 'subagent',
   args = { tasks = { { agent = 'scout' }, { agent = 'reviewer' } } },
@@ -80,7 +146,9 @@ renderer.handle_event({
 })
 renderer.flush_pending_tool_renders()
 assert(valid_win(state.ui.subagent_tree_win), 'agent tree should appear when subagents exist')
-assert(vim.api.nvim_win_get_height(state.ui.subagent_tree_win) <= 8, 'agent tree height must be capped at 8 rows')
+local two_subagent_tree_height = vim.api.nvim_win_get_height(state.ui.subagent_tree_win)
+assert(two_subagent_tree_height == 5, 'two subagents should adapt to five rows, got ' .. tostring(two_subagent_tree_height))
+assert(two_subagent_tree_height <= 8, 'agent tree height must be capped at 8 rows')
 assert(vim.api.nvim_win_get_buf(state.ui.subagent_tree_win) == state.ui.subagent_tree_buf, 'agent tree window should show agent tree buffer')
 local tree = buf_text(state.ui.subagent_tree_buf)
 assert(tree:find('root%-agent %- ', 1, false), tree)
