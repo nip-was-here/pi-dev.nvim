@@ -1054,7 +1054,7 @@ function M.refresh_subagent_tree()
   set_buffer_lines(state.ui.subagent_tree_buf, lines, 'text')
   set_subagent_tree_keymaps(state.ui.subagent_tree_buf)
 
-  local height = math.min(8, math.max(1, #lines))
+  local height = math.min(8, math.max(1, #lines + 2))
   if valid_win(state.ui.subagent_tree_win) then
     if vim.api.nvim_win_get_buf(state.ui.subagent_tree_win) ~= state.ui.subagent_tree_buf then
       unlock_window_buffer(state.ui.subagent_tree_win)
