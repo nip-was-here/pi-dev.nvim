@@ -105,6 +105,20 @@ local function interaction_item_line(interaction, index)
   return (interaction.item_start_line or 1) + index - 1
 end
 
+local function normalize_line_endings(value)
+  return tostring(value or ''):gsub('\r\n', '\n'):gsub('\r', '\n')
+end
+
+local function single_line(value)
+  return normalize_line_endings(value):gsub('\n+', ' ')
+end
+
+local function append_text_lines(lines, value)
+  for _, line in ipairs(vim.split(normalize_line_endings(value), '\n', { plain = true })) do
+    table.insert(lines, line)
+  end
+end
+
 local function apply_interaction_folds(interaction)
   local bufnr = interaction_buffer(interaction)
   local win = interaction_window(interaction)
@@ -176,10 +190,10 @@ local function render_interaction()
 
   local plain = interaction.filetype == 'text' or interaction.markdown == false
   local numbered = interaction.numbered ~= false
-  local title = interaction.title or 'Pi interaction'
+  local title = single_line(interaction.title or 'Pi interaction')
   local lines = { plain and title or ('#### ' .. title), '' }
   if interaction.message and interaction.message ~= '' then
-    vim.list_extend(lines, vim.split(interaction.message, '\n', { plain = true }))
+    append_text_lines(lines, interaction.message)
     table.insert(lines, '')
   end
 
@@ -191,9 +205,9 @@ local function render_interaction()
   interaction.line_to_item = {}
   for index, item in ipairs(interaction.items or {}) do
     for _, before_line in ipairs(item.before_lines or {}) do
-      table.insert(lines, before_line)
+      append_text_lines(lines, before_line)
     end
-    local label = item.label or ''
+    local label = single_line(item.label or '')
     local meta = item.meta or item.date_text
     local selectable = item.selectable ~= false
     local selected = selectable and index == interaction.selected
@@ -210,7 +224,7 @@ local function render_interaction()
       line = '- ' .. label
     end
     if meta and meta ~= '' then
-      local meta_text = tostring(meta)
+      local meta_text = single_line(meta)
       local win = interaction_window(interaction)
       local max_width = format.window_text_width(win, vim.o.columns)
       line = format.right_suffix(line, meta_text, max_width)
