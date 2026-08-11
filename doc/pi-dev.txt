@@ -129,15 +129,16 @@ Input surface ~
 
 Interaction surface ~
   The transient UI for permission decisions, selects, input/editor requests,
-  model controls, session controls, tree navigation, and waiting navigation.
+  model controls, role controls, session controls, tree navigation, and waiting
+  navigation.
   Large tree/waiting navigators render in the output surface; permission/text
   interactions render in the lower pane.
 
 Status separator ~
   Non-focusable chrome between output and lower surfaces. It shows compact
-  operational state and metrics such as cost, tokens, context, and model. State
-  labels include `run`, `idle`, `wait`, `load`, `compact`, `retry`, `queue`,
-  `err`, and `off`. It is not the Neovim statusline.
+  operational state and metrics such as cost, tokens, context, model, and the
+  current role. State labels include `run`, `idle`, `wait`, `load`, `compact`,
+  `retry`, `queue`, `err`, and `off`. It is not the Neovim statusline.
 
 Rendering and folds ~
   The output buffer uses Markdown filetype by default. Tool, permission, and
@@ -216,6 +217,11 @@ Rendering and folds ~
 :PiDevModel             Pick a Pi model. Model changes are unavailable during
                         active streaming/tool work; try again after the turn.
 
+                                                        *:PiDevRole*
+:PiDevRole [role]       Pick a Pi role, or set the given role name. Role changes
+                        are unavailable during active streaming/tool work; try
+                        again after the turn.
+
                                                         *:PiDevReload*
 :PiDevReload            Restart the active runtime and reload current session
                         context. It asks for confirmation only when the active
@@ -270,6 +276,7 @@ Slash commands ~                                      *pi-dev-slash-commands*
     /export [path]      Export current Pi session to HTML; prompts when omitted.
     /hotkeys            Show plugin commands and configured hotkeys.
     /model              Pick a Pi model when idle or waiting.
+    /role [role]        Pick a Pi role, or set the given role when idle/waiting.
     /resume             Pick a current-directory session.
     /delete-session     Delete or trash the selected resume/current session tree.
     /reload             Restart active RPC runtime and reload session context.
@@ -604,6 +611,8 @@ Documented top-level methods:
   new_session(callback)               Create a new session.
   resume()                            Open current-directory session picker.
   model_picker()                      Pick a model.
+  role_picker()                       Pick a role.
+  set_role(role, callback)            Set a role.
   reload(callback)                    Reload active runtime/session context.
   tree()                              Open tree navigation.
   waiting()                           Open waiting navigation.
@@ -756,7 +765,7 @@ The health provider checks:
 
 Useful diagnostic slash commands:
 
-  /session   Show current session, root session, runtime, model, metrics.
+  /session   Show current session, root session, runtime, model, role, metrics.
   /hotkeys   Show plugin commands and configured hotkeys.
   /reload    Restart the active runtime and reload current branch/session
              context.

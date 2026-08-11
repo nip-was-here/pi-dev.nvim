@@ -220,6 +220,14 @@ function M.model_picker()
   return M.api.model_picker()
 end
 
+function M.role_picker()
+  return M.api.role_picker()
+end
+
+function M.set_role(role, callback)
+  return M.api.set_role(role, callback)
+end
+
 function M.reload(callback)
   return M.api.reload(callback)
 end

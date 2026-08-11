@@ -22,6 +22,20 @@ local function compact_model(model)
   return tostring(model)
 end
 
+local function compact_role(role)
+  if not role or role == vim.NIL then
+    return nil
+  end
+  if type(role) == 'string' then
+    return role ~= '' and role or nil
+  end
+  if type(role) == 'table' then
+    local name = role.name or role.id or role.role or role.label or role.title
+    return name and tostring(name) or nil
+  end
+  return tostring(role)
+end
+
 local function is_nil(value)
   return value == nil or value == vim.NIL
 end
@@ -262,9 +276,13 @@ function M.update_from_state(data, opts)
     runtime.status = state.statusline.status
   end
   local model = compact_model(data.model)
+  local role = compact_role(data.role or data.currentRole or data.current_role or data.roleName or data.role_name)
   local thinking_level = data.thinkingLevel or data.thinking_level or data.reasoningLevel or data.reasoning_level
   if model then
     runtime.model = model
+  end
+  if role then
+    runtime.role = role
   end
   if thinking_level ~= nil and thinking_level ~= vim.NIL then
     runtime.thinking_level = thinking_level
@@ -580,6 +598,9 @@ local function render_parts(prefix, width)
   end
   if info.model then
     table.insert(right_parts, info.model)
+  end
+  if info.role then
+    table.insert(right_parts, 'role ' .. tostring(info.role))
   end
 
   width = width or vim.api.nvim_win_get_width(0)

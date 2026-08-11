@@ -24,6 +24,7 @@ local commands = {
   'PiDevExport',
   'PiDevHotkeys',
   'PiDevQuit',
+  'PiDevRole',
 }
 for _, command in ipairs(commands) do
   assert(vim.fn.exists(':' .. command) == 2, command .. ' command should exist')
@@ -38,7 +39,11 @@ rpc.request = function(message, cb)
   if message.type == 'set_session_name' and cb then
     cb({ success = true, data = {} })
   elseif message.type == 'get_state' and cb then
-    cb({ success = true, data = { sessionFile = state.session.current_file, sessionId = 'sid-1', sessionName = 'Named root', model = { provider = 'fake', id = 'model' } } })
+    cb({ success = true, data = { sessionFile = state.session.current_file, sessionId = 'sid-1', sessionName = 'Named root', model = { provider = 'fake', id = 'model' }, role = 'architect' } })
+  elseif message.type == 'get_available_roles' and cb then
+    cb({ success = true, data = { roles = { { name = 'architect', description = 'Architecture review' }, { name = 'implementer', description = 'Implementation work' } }, currentRole = 'architect' } })
+  elseif message.type == 'set_role' and cb then
+    cb({ success = true, data = { role = message.role } })
   elseif message.type == 'get_session_stats' and cb then
     cb({ success = true, data = { sessionId = 'sid-1', totalMessages = 7, userMessages = 3, assistantMessages = 2, toolCalls = 1, tokens = { total = 123 }, cost = 0.25 } })
   elseif message.type == 'compact' and cb then
@@ -82,6 +87,25 @@ assert(sent[#sent].type == 'compact' and sent[#sent].customInstructions == 'keep
 api.export_session('./tmp/pi-dev-test/export.html')
 assert(sent[#sent].type == 'export_html' and sent[#sent].outputPath == './tmp/pi-dev-test/export.html', vim.inspect(sent[#sent]))
 
+api.set_role('architect')
+assert(sent[#sent].type == 'set_role' and sent[#sent].role == 'architect', vim.inspect(sent[#sent]))
+assert(state.statusline.role == 'architect', state.statusline.role)
+
+local selected_roles
+local selected_role_prompt
+vim.ui.select = function(items, opts, cb)
+  selected_roles = items
+  selected_role_prompt = opts and opts.prompt
+  cb(items[2])
+end
+api.role_picker()
+assert(sent[#sent - 1].type == 'get_available_roles', vim.inspect(sent))
+assert(selected_role_prompt == 'Pi role', selected_role_prompt)
+assert(#selected_roles == 2 and selected_roles[1].name == 'architect' and selected_roles[2].name == 'implementer', vim.inspect(selected_roles))
+assert(sent[#sent].type == 'set_role' and sent[#sent].role == 'implementer', vim.inspect(sent[#sent]))
+assert(api.handle_slash_command('/role architect') == true, '/role should set role')
+assert(sent[#sent].type == 'set_role' and sent[#sent].role == 'architect', vim.inspect(sent[#sent]))
+
 api.bash('printf pi')
 assert(sent[#sent].type == 'bash' and sent[#sent].command == 'printf pi', vim.inspect(sent[#sent]))
 
@@ -113,6 +137,15 @@ assert(output:find(':PiDevCompact', 1, true), output)
 assert(output:find(':PiDevExport', 1, true), output)
 assert(output:find(':PiDevHotkeys', 1, true), output)
 assert(output:find(':PiDevQuit', 1, true), output)
+assert(output:find(':PiDevRole', 1, true), output)
+
+local role_completion_seen = false
+for _, item in ipairs(completion.items('ro')) do
+  if item.word == '/role' then
+    role_completion_seen = true
+  end
+end
+assert(role_completion_seen, vim.inspect(completion.items('ro')))
 
 local skill_items = completion.items('skill:')
 local has_skill_fallback = false

@@ -172,6 +172,20 @@ function M.command_specs(api)
     end,
   },
   {
+    id = 'role',
+    command = 'PiDevRole',
+    command_desc = 'Pick or set Pi.dev role',
+    command_opts = { nargs = '*' },
+    run = function(command)
+      local role = command and vim.trim(command.args or '') or ''
+      if role ~= '' then
+        api.set_role(role)
+      else
+        api.role_picker()
+      end
+    end,
+  },
+  {
     id = 'reload',
     command = 'PiDevReload',
     command_desc = 'Reload Pi.dev RPC and current session',
@@ -237,6 +251,7 @@ function M.slash_specs(api)
     { names = { 'hotkeys' }, run = function() api.hotkeys() end },
     { names = { 'quit' }, run = function() api.stop_current_rpc() end },
     { names = { 'model' }, run = function() api.model_picker() end },
+    { names = { 'role' }, takes_arg = true, run = function(arg) if arg then api.set_role(arg) else api.role_picker() end end },
     { names = { 'resume' }, run = function() api.resume() end },
     { names = { 'reload' }, run = function() api.reload() end },
     { names = { 'stop-rpc', 'stop' }, run = function() api.stop_current_rpc() end },
@@ -271,6 +286,7 @@ end
 function M.fallback_completion_commands()
   return {
     { name = 'model', description = 'Pick Pi model' },
+    { name = 'role', description = 'Pick or set Pi role' },
     { name = 'resume', description = 'Resume/switch current-directory Pi session' },
     { name = 'reload', description = 'Reload Pi RPC and current-directory session' },
     { name = 'name', description = 'Set root Pi session display name' },
