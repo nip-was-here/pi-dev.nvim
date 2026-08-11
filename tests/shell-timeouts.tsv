@@ -41,6 +41,7 @@ permissions/restored_full_bash.sh	0.5s
 permissions/scroll_bottom.sh	0.6s
 permissions/session_detail_dedupe.sh	0.6s
 permissions/subagent_permission_parent_mirror.sh	0.6s
+permissions/subagent_wait_permission_root.sh	0.6s
 renderer/agent_tool_heading_nesting.sh	0.5s
 renderer/bash_tool_header_dedupe.sh	0.5s
 renderer/bash_tool_header_first_arg.sh	0.5s
