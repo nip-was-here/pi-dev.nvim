@@ -75,11 +75,11 @@ bottom layout is also configurable.
   output, service notices, errors, and large tree/waiting/subagent views.
 - **Input surface**: editable prompt buffer for normal user messages.
 - **Interaction surface**: transient UI for permissions, selects, text/editor
-  prompts, model/session controls, tree navigation, and waiting-branch
+  prompts, model/role/session controls, tree navigation, and waiting-branch
   navigation.
 - **Status separator**: non-focusable chrome between output and lower surfaces.
   It shows compact state (`run`, `idle`, `wait`, `load`, etc.) plus metrics such
-  as cost, tokens, context, and model.
+  as cost, tokens, context, model, and current role.
 
 Hiding the panel does not stop active RPC runtimes. Abort asks Pi to cancel the
 current operation while keeping the runtime attached when possible, and clears
@@ -110,6 +110,7 @@ preserved.
 | Resume a current-directory session | `:PiDevResume` | `<leader>ar` | `/resume` |
 | Delete or trash the current session tree | `:PiDevDeleteSession` | - | `/delete-session` |
 | Pick a Pi model when idle/waiting | `:PiDevModel` | `<leader>am` | `/model` |
+| Pick or set a Pi role when idle/waiting | `:PiDevRole [role]` | - | `/role [role]` |
 | Restart active RPC runtime and reload session context | `:PiDevReload` | `<leader>aR` | `/reload` |
 | Open tree/fork navigation | `:PiDevTree` | `<leader>at` | `/tree` |
 | Open waiting-input branch navigation | `:PiDevWaiting` | `<leader>aw` | `/waiting` |
@@ -207,6 +208,7 @@ local pi_dev = require('pi-dev')
 pi_dev.setup({})
 pi_dev.toggle()
 pi_dev.prompt('Explain this buffer')
+pi_dev.set_role('architect')
 ```
 
 Documented top-level methods on `require('pi-dev')` are the public convenience

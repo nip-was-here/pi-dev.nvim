@@ -352,6 +352,7 @@ function M.show_session_info(callback)
           '- session id: ' .. tostring(data.sessionId or stats.sessionId or '-'),
           '- session name: ' .. tostring(data.sessionName or '-'),
           '- model: ' .. tostring(state.statusline.model or '-'),
+          '- role: ' .. tostring(state.statusline.role or '-'),
           '- thinking: ' .. tostring(state.statusline.thinking_level or '-'),
           '- messages: ' .. tostring(stats.totalMessages or data.messageCount or '-'),
           '- user/assistant/tool: ' .. tostring(stats.userMessages or '-') .. '/' .. tostring(stats.assistantMessages or '-') .. '/' .. tostring(stats.toolCalls or '-'),
@@ -596,6 +597,55 @@ local function reject_model_change_during_active_work(callback)
   return nil
 end
 
+local function reject_role_change_during_active_work(callback)
+  local message = 'Role change is unavailable during active Pi work; try again after the current turn.'
+  vim.notify(message, vim.log.levels.WARN)
+  renderer.append_system(message)
+  if callback then
+    callback({ success = false, cancelled = true, error = 'role change unavailable during active work' })
+  end
+  return nil
+end
+
+local function role_name(role)
+  if not role or role == vim.NIL then
+    return nil
+  end
+  if type(role) == 'string' then
+    local trimmed = vim.trim(role)
+    return trimmed ~= '' and trimmed or nil
+  end
+  if type(role) == 'table' then
+    return role_name(role.name or role.id or role.role or role.label or role.title)
+  end
+  return tostring(role)
+end
+
+local function response_role(response, fallback)
+  local data = response and response.data
+  if type(data) == 'table' then
+    return role_name(data.role or data.currentRole or data.current_role or data.roleName or data.role_name) or role_name(fallback)
+  end
+  return role_name(data) or role_name(fallback)
+end
+
+local function normalize_roles(data)
+  data = data or {}
+  local raw = type(data) == 'table' and (data.roles or data.availableRoles or data.available_roles or data) or {}
+  local out = {}
+  for _, role in ipairs(raw or {}) do
+    local name = role_name(role)
+    if name then
+      table.insert(out, type(role) == 'table' and role or { name = name })
+      out[#out].name = out[#out].name or name
+    end
+  end
+  table.sort(out, function(a, b)
+    return tostring(a.name or ''):lower() < tostring(b.name or ''):lower()
+  end)
+  return out
+end
+
 function M.set_model(provider, model_id, callback)
   if active_runtime_has_active_work() then
     return reject_model_change_during_active_work(callback)
@@ -649,6 +699,79 @@ function M.model_picker()
       local model = choice and by_label[choice]
       if model then
         M.set_model(model.provider, model.id or model.name)
+      end
+    end)
+  end)
+end
+
+function M.get_available_roles(callback)
+  rpc.start()
+  return rpc.request({ type = 'get_available_roles' }, callback)
+end
+
+function M.set_role(role, callback)
+  local name = role_name(role)
+  if not name then
+    return M.role_picker(callback)
+  end
+  if active_runtime_has_active_work() then
+    return reject_role_change_during_active_work(callback)
+  end
+  rpc.start()
+  statusline.clear_error()
+  ui.refresh_chrome()
+  return rpc.request({ type = 'set_role', role = name }, function(response)
+    if response and response.success then
+      local selected = response_role(response, name)
+      statusline.update_from_state({ role = selected }, { runtime = response_runtime(response) })
+      if response_is_active(response) then
+        renderer.append_system('Role set to `' .. tostring(selected or name) .. '`.')
+        ui.refresh_chrome()
+      end
+      M.refresh_status(50)
+    elseif response and response.error then
+      if response_is_active(response) then
+        statusline.set_error(response.error)
+        ui.refresh_chrome()
+      end
+    else
+      record_command_response(response)
+    end
+    if callback then
+      callback(response)
+    end
+  end)
+end
+
+function M.role_picker(callback)
+  if active_runtime_has_active_work() then
+    return reject_role_change_during_active_work(callback)
+  end
+  return M.get_available_roles(function(response)
+    local roles = response and response.success and normalize_roles(response.data) or {}
+    if #roles == 0 then
+      vim.notify('No Pi roles available', vim.log.levels.WARN)
+      if callback then
+        callback(response)
+      end
+      return
+    end
+    local current = type(response.data) == 'table' and role_name(response.data.currentRole or response.data.current_role or response.data.role) or nil
+    statusline.update_from_state({ role = current })
+    vim.ui.select(roles, {
+      prompt = 'Pi role',
+      format_item = function(item)
+        local label = tostring(item.name or role_name(item) or '')
+        if item.description and item.description ~= '' then
+          label = label .. ' - ' .. tostring(item.description)
+        end
+        return label
+      end,
+    }, function(choice)
+      if choice then
+        M.set_role(role_name(choice), callback)
+      elseif callback then
+        callback({ success = false, cancelled = true, error = 'role selection cancelled' })
       end
     end)
   end)

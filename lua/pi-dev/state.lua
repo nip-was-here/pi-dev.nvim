@@ -60,6 +60,7 @@ local M = {
     loading = false,
     error = nil,
     model = nil,
+    role = nil,
     thinking_level = nil,
     cost = nil,
     tokens = nil,
@@ -94,6 +95,7 @@ local function runtime_defaults(key)
     input_text = '',
     editor_text = '',
     model = nil,
+    role = nil,
     thinking_level = nil,
     cost = nil,
     tokens = nil,
@@ -115,6 +117,7 @@ local function sync_statusline_from_runtime(runtime)
   M.statusline.loading = loading
   M.statusline.error = runtime.error
   M.statusline.model = runtime.model
+  M.statusline.role = runtime.role
   M.statusline.thinking_level = runtime.thinking_level
   M.statusline.cost = runtime.cost
   M.statusline.tokens = runtime.tokens
@@ -290,6 +293,7 @@ function M.reset_rpc_runtime(runtime, remove)
   runtime.input_text = ''
   runtime.editor_text = ''
   runtime.model = nil
+  runtime.role = nil
   runtime.thinking_level = nil
   runtime.cost = nil
   runtime.tokens = nil
