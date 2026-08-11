@@ -137,6 +137,7 @@ ui/focus_input_normal_mode.sh	0.5s
 ui/input_active_steer.sh	0.5s
 ui/input_history_recall.sh	0.9s
 ui/interaction_boundary_keys.sh	0.5s
+ui/interaction_multiline_labels.sh	0.5s
 ui/interaction_numeric_keymaps.sh	0.5s
 ui/interaction_request_dedupe.sh	0.5s
 ui/loading_status_input_lock.sh	0.5s
