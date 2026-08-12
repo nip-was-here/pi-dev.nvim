@@ -13,6 +13,7 @@ local ui = require('pi-dev.ui')
 local M = {}
 
 local first_open_status_rechecked = false
+local send_user_text
 
 local function record_command_response(response)
   if response and response.__pi_runtime_key and response.__pi_runtime_key ~= state.rpc.active_key then
@@ -629,6 +630,26 @@ local function response_role(response, fallback)
   return role_name(data) or role_name(fallback)
 end
 
+local function role_rpc_unsupported(response, command)
+  if not (response and response.success == false) then
+    return false
+  end
+  local error_message = tostring(response.error or '')
+  return error_message == ('Unknown command: ' .. command)
+    or (response.command == command and error_message:match('^Unknown command:') ~= nil)
+end
+
+local function fallback_role_slash(role, callback)
+  local name = role_name(role)
+  local text = name and ('/role ' .. name) or '/role'
+  if send_user_text then
+    send_user_text(text, callback)
+  elseif callback then
+    callback({ success = false, error = 'role fallback unavailable' })
+  end
+  return true
+end
+
 local function normalize_roles(data)
   data = data or {}
   local raw = type(data) == 'table' and (data.roles or data.availableRoles or data.available_roles or data) or {}
@@ -721,6 +742,10 @@ function M.set_role(role, callback)
   statusline.clear_error()
   ui.refresh_chrome()
   return rpc.request({ type = 'set_role', role = name }, function(response)
+    if role_rpc_unsupported(response, 'set_role') then
+      fallback_role_slash(name, callback)
+      return
+    end
     if response and response.success then
       local selected = response_role(response, name)
       statusline.update_from_state({ role = selected }, { runtime = response_runtime(response) })
@@ -748,6 +773,10 @@ function M.role_picker(callback)
     return reject_role_change_during_active_work(callback)
   end
   return M.get_available_roles(function(response)
+    if role_rpc_unsupported(response, 'get_available_roles') then
+      fallback_role_slash(nil, callback)
+      return
+    end
     local roles = response and response.success and normalize_roles(response.data) or {}
     if #roles == 0 then
       vim.notify('No Pi roles available', vim.log.levels.WARN)
@@ -801,11 +830,11 @@ function M.get_state(callback)
   end)
 end
 
-local function send_user_text(message)
+send_user_text = function(message, callback)
   if state.statusline.active then
-    M.steer(message)
+    M.steer(message, callback)
   else
-    M.prompt(message)
+    M.prompt(message, nil, callback)
   end
   renderer.append_user(message)
 end
