@@ -326,6 +326,175 @@ local function child_buffer_lines(title, main_info, result_lines, status)
   return lines
 end
 
+local known_statuses = {
+  'timed out',
+  'cancelled',
+  'canceled',
+  'completed',
+  'complete',
+  'detached',
+  'failed',
+  'failure',
+  'interrupted',
+  'running',
+  'queued',
+  'active',
+  'done',
+  'error',
+}
+
+local function escaped_pattern(text)
+  return tostring(text or ''):gsub('([^%w])', '%%%1')
+end
+
+local function parse_status_suffix(rest)
+  local head = tostring(rest or ''):gsub(',.*$', '')
+  for _, status in ipairs(known_statuses) do
+    local escaped = escaped_pattern(status)
+    local agent = head:match('^(.-)%s+' .. escaped .. '%s*%(') or head:match('^(.-)%s+' .. escaped .. '$')
+    if agent and vim.trim(agent) ~= '' then
+      return vim.trim(agent), status
+    end
+  end
+  return vim.trim(head), nil
+end
+
+local function parse_status_child_line(line)
+  line = tostring(line or '')
+  local index, total, rest = line:match('^Step%s+%S+%s+Agent%s+(%d+)/(%d+):%s+(.+)$')
+  if not index then
+    index, total, rest = line:match('^Agent%s+(%d+)/(%d+):%s+(.+)$')
+  end
+  if index then
+    local agent, status = parse_status_suffix(rest)
+    return {
+      index = tonumber(index),
+      total = tonumber(total),
+      agent = agent ~= '' and agent or ('agent ' .. tostring(index)),
+      status = status,
+      raw = line,
+    }
+  end
+
+  local key, name, agent, status = line:match('^Workflow child%s+([^:]+):%s+(.+)%s+%(([^%)]+)%)%s+([%w%s]+)')
+  if key then
+    status = vim.trim(status or '')
+    return {
+      agent = vim.trim(agent) ~= '' and vim.trim(agent) or vim.trim(name),
+      status = status ~= '' and status or nil,
+      raw = line,
+    }
+  end
+  return nil
+end
+
+local function status_summary_lines(text)
+  local lines = {}
+  local allowed = {
+    Run = true,
+    State = true,
+    Activity = true,
+    Mode = true,
+    Progress = true,
+    Started = true,
+    Updated = true,
+    Dir = true,
+    Output = true,
+    Session = true,
+    Log = true,
+    Events = true,
+  }
+  for _, line in ipairs(vim.split(normalize_line_endings(text), '\n', { plain = true })) do
+    local key, value = line:match('^([%w%s]+):%s*(.+)$')
+    key = key and vim.trim(key) or nil
+    if key and allowed[key] and vim.trim(value or '') ~= '' then
+      table.insert(lines, ('**%s:** %s'):format(key, tostring(value)))
+    end
+  end
+  return lines
+end
+
+local function child_action_from_details(details, status)
+  for _, line in ipairs(details or {}) do
+    local output = tostring(line or ''):match('^%s*Output:%s*(.+)$')
+    if output then
+      return output
+    end
+    local active = tostring(line or ''):match(',%s*(active.-)$')
+    if active then
+      return active
+    end
+  end
+  return status or 'status'
+end
+
+function M.status_text_parent_lines(text)
+  text = normalize_line_endings(text or '')
+  if vim.trim(text) == '' then
+    return nil
+  end
+
+  local parsed = {}
+  local current
+  for _, line in ipairs(vim.split(text, '\n', { plain = true })) do
+    local child = parse_status_child_line(line)
+    if child then
+      current = child
+      current.details = {}
+      table.insert(parsed, current)
+    elseif current and line:match('^%s+') and vim.trim(line) ~= '' then
+      table.insert(current.details, vim.trim(line))
+    end
+  end
+
+  if #parsed == 0 then
+    return nil
+  end
+
+  local lines = { '#### Result' }
+  local summary = status_summary_lines(text)
+  if #summary > 0 then
+    table.insert(lines, '')
+    vim.list_extend(lines, summary)
+  end
+
+  local children = {}
+  for index, item in ipairs(parsed) do
+    local label = item.total and ('Agent ' .. tostring(item.index or index) .. '/' .. tostring(item.total) .. ': ' .. item.agent) or item.agent
+    local header = item.status and ('##### ' .. label .. ' - ' .. tostring(item.status)) or ('##### ' .. label)
+    table.insert(lines, '')
+    table.insert(lines, header)
+    table.insert(lines, '')
+    table.insert(lines, '###### Main info')
+    table.insert(lines, '**Status:** ' .. tostring(item.status or 'unknown'))
+    table.insert(lines, '**Details:** ' .. item.raw)
+    for _, detail in ipairs(item.details or {}) do
+      table.insert(lines, '- ' .. detail)
+    end
+
+    local main_info = {
+      '## Main info',
+      '**Status:** ' .. tostring(item.status or 'unknown'),
+      '**Details:** ' .. item.raw,
+    }
+    for _, detail in ipairs(item.details or {}) do
+      table.insert(main_info, '- ' .. detail)
+    end
+    table.insert(children, {
+      header = header,
+      label = label,
+      title = buffer_title(label),
+      agent = item.agent,
+      status = item.status,
+      action = child_action_from_details(item.details, item.status),
+      lines = child_buffer_lines(buffer_title(label), main_info, {}, item.status),
+    })
+  end
+
+  lines.__pi_subagent_children = children
+  return lines
+end
+
 local function tool_call_id(item)
   if type(item) ~= 'table' then
     return nil

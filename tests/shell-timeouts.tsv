@@ -57,6 +57,7 @@ renderer/subagent_action_result.sh	0.6s
 renderer/subagent_live_progress.sh	0.6s
 renderer/subagent_buffer_navigation.sh	0.6s
 renderer/subagent_open_live_refresh.sh	0.6s
+renderer/subagent_status_text_tree.sh	0.6s
 renderer/thinking_autofold_threshold.sh	0.5s
 renderer/thinking_whitespace_cleanup.sh	0.5s
 renderer/tool_autofold_chunked.sh	0.6s
