@@ -164,8 +164,9 @@ state; inactive branch runtimes remain attached.
 The root chat header keeps root identity, runtime, status, role, model,
 thinking level, and session path. Subagent tool output stays compact in the
 parent chat, but each child block keeps its available identity, role/skills,
-task, status, model/thinking, progress, and
-complete command summaries supplied by Pi. The focused child chat shows the full
+task, status, model/thinking, progress, and complete command summaries supplied
+by Pi. For scripted workflows, declared `runs.run`/`runs.all` children appear
+immediately from the tool request, before their first progress update. The focused child chat shows the full
 available child transcript and command history. While descendants are running, a
 compact agent tree appears above the chat and lists `root-agent` plus every active
 child, grandchild, and deeper descendant recursively. Each row ends with the

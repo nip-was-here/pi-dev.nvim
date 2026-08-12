@@ -867,6 +867,8 @@ function M.is_tool(tool_name)
     or lower:match('[_%-]subagent$') ~= nil
 end
 
+local workflow_run_descriptors
+
 function M.summary(args)
   if type(args) ~= 'table' then
     return nil
@@ -880,10 +882,170 @@ function M.summary(args)
   if args.tasks then
     return 'parallel tasks'
   end
+  if type(args.workflowScript) == 'string' then
+    local descriptors = workflow_run_descriptors(args.workflowScript)
+    if #descriptors > 1 then
+      return 'workflow (' .. tostring(#descriptors) .. ' agents)'
+    end
+    return 'workflow'
+  end
   if args.chain then
     return 'chain'
   end
   return nil
+end
+
+local function javascript_code_at(script, target)
+  local quote
+  local escaped = false
+  local line_comment = false
+  local block_comment = false
+  local index = 1
+  while index < target do
+    local char = script:sub(index, index)
+    local next_char = script:sub(index + 1, index + 1)
+    if line_comment then
+      if char == '\n' then line_comment = false end
+    elseif block_comment then
+      if char == '*' and next_char == '/' then
+        block_comment = false
+        index = index + 1
+      end
+    elseif quote then
+      if escaped then
+        escaped = false
+      elseif char == '\\' then
+        escaped = true
+      elseif char == quote then
+        quote = nil
+      end
+    elseif char == '/' and next_char == '/' then
+      line_comment = true
+      index = index + 1
+    elseif char == '/' and next_char == '*' then
+      block_comment = true
+      index = index + 1
+    elseif char == "'" or char == '"' or char == '`' then
+      quote = char
+    end
+    index = index + 1
+  end
+  return not quote and not line_comment and not block_comment
+end
+
+local function code_matches(script, pattern)
+  local matches = {}
+  local search_from = 1
+  while true do
+    local found = { script:find(pattern, search_from) }
+    local start_at = found[1]
+    if not start_at then break end
+    if javascript_code_at(script, start_at) then
+      table.insert(matches, found)
+    end
+    search_from = math.max(start_at + 1, (found[2] or start_at) + 1)
+  end
+  return matches
+end
+
+workflow_run_descriptors = function(script)
+  script = tostring(script or '')
+  local descriptors = {}
+  local seen = {}
+  local command = #code_matches(script, 'runs%.all%s*%(') > 0 and 'runs.all'
+    or #code_matches(script, 'runs%.run%s*%(') > 0 and 'runs.run'
+    or 'workflow'
+  local function quoted_field(body, field)
+    local quote, value = (',' .. body):match('[,{]%s*' .. field .. "%s*:%s*(['\"])(.-)%1")
+    if not quote then
+      return nil
+    end
+    return value:gsub('\\n', '\n'):gsub('\\r', '\r'):gsub('\\t', '\t'):gsub('\\([\\\'\"])', '%1')
+  end
+  local function append(body, fallback_name)
+    local agent = quoted_field(body, 'agent')
+    local task = quoted_field(body, 'task')
+    local name = quoted_field(body, 'key') or fallback_name or agent
+    if not agent or seen[tostring(name) .. '\0' .. tostring(agent)] then
+      return
+    end
+    seen[tostring(name) .. '\0' .. tostring(agent)] = true
+    local skills = {}
+    local skill_list = body:match('skills?%s*:%s*%[([^%]]*)%]')
+    for skill in tostring(skill_list or ''):gmatch("'([^']+)'") do
+      table.insert(skills, skill)
+    end
+    for skill in tostring(skill_list or ''):gmatch('"([^"]+)"') do
+      table.insert(skills, skill)
+    end
+    if #skills == 0 then
+      local skill = quoted_field(body, 'skills?')
+      if skill then table.insert(skills, skill) end
+    end
+    table.insert(descriptors, {
+      name = name,
+      agent = agent,
+      role = quoted_field(body, 'role') or agent,
+      skills = skills,
+      model = quoted_field(body, 'model'),
+      thinking = quoted_field(body, 'thinking'),
+      task = task,
+      command = command,
+    })
+  end
+  local arrays = {}
+  for _, match in ipairs(code_matches(script, '([%a_$][%w_$]*)%s*=%s*%[(.-)%]%s*;')) do
+    arrays[match[3]] = match[4]
+  end
+  for _, match in ipairs(code_matches(script, 'runs%.all%s*%(([^%)]-)%)')) do
+    local argument = match[3]
+    local body = arrays[vim.trim(argument)] or argument:match('^%s*%[(.*)%]%s*$')
+    if body then
+      for object in body:gmatch('{([^{}]-)}') do
+        append(object)
+      end
+    end
+  end
+  for _, match in ipairs(code_matches(script, "runs%.run%s*%(%s*'([^']+)'%s*,%s*{([^{}]-)}")) do
+    append(match[4], match[3])
+  end
+  for _, match in ipairs(code_matches(script, 'runs%.run%s*%(%s*"([^"]+)"%s*,%s*{([^{}]-)}')) do
+    append(match[4], match[3])
+  end
+  return descriptors, command
+end
+
+local function request_children(args)
+  if type(args) ~= 'table' or type(args.workflowScript) ~= 'string' then
+    return {}
+  end
+  local descriptors = workflow_run_descriptors(args.workflowScript)
+  local children = {}
+  for index, item in ipairs(descriptors) do
+    local main_info = { '## Main info' }
+    append_agent_info(main_info, item, nil, 'running', item.agent, { name = item.name })
+    if item.task and item.task ~= '' then
+      table.insert(main_info, '**Task:** ' .. compact_header_text(item.task, 160))
+    end
+    table.insert(main_info, '**Command:** ' .. item.command)
+    table.insert(children, {
+      header = '##### Agent ' .. tostring(index) .. '/' .. tostring(#descriptors) .. ': ' .. tostring(item.name) .. ' - running',
+      key = 'agent-' .. tostring(index),
+      request_key = 'request-agent-' .. tostring(index) .. '-' .. tostring(item.name),
+      label = item.name,
+      name = item.name,
+      title = item.name,
+      agent = item.agent,
+      role = item.role,
+      skills = item.skills,
+      status = 'running',
+      active = true,
+      action = item.command,
+      request_main_info = main_info,
+      lines = child_buffer_lines(item.name, main_info, { '_Sub-agent has not produced output yet._' }, 'running'),
+    })
+  end
+  return children
 end
 
 function M.args_to_lines(args)
@@ -911,6 +1073,17 @@ function M.args_to_lines(args)
   end
   if type(args.chain) == 'table' then
     field('Chain steps', #args.chain)
+  end
+  local children = request_children(args)
+  if #children > 0 then
+    for index, child in ipairs(children) do
+      table.insert(lines, '')
+      table.insert(lines, child.header)
+      table.insert(lines, '')
+      table.insert(lines, '###### Main info')
+      vim.list_extend(lines, vim.list_slice(child.request_main_info or {}, 2))
+    end
+    lines.__pi_subagent_children = children
   end
 
   if #lines == 1 then
@@ -1346,17 +1519,65 @@ function M.child_from_buffer(bufnr, line)
   return M.child_from_buffer_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), line)
 end
 
+local function merge_child_identity(previous, child)
+  if not previous then
+    return child
+  end
+  local merged = vim.deepcopy(child)
+  local incoming_key = tostring(merged.key or '')
+  local previous_key = tostring(previous.request_key or previous.key or '')
+  if not (incoming_key:match('^agent%-%d+$') and previous_key:match('^request%-agent%-')) then
+    return merged
+  end
+  for _, field in ipairs({ 'key', 'request_key', 'request_main_info', 'name', 'title', 'label' }) do
+    if previous[field] ~= nil then
+      merged[field] = vim.deepcopy(previous[field])
+    end
+  end
+  for _, field in ipairs({ 'agent', 'role', 'skills', 'task', 'model', 'thinking' }) do
+    if (merged[field] == nil or merged[field] == '' or (type(merged[field]) == 'table' and #merged[field] == 0)) and previous[field] ~= nil then
+      merged[field] = vim.deepcopy(previous[field])
+    end
+  end
+  local lines = merged.lines or {}
+  local insert_at
+  for index, line in ipairs(lines) do
+    if tostring(line):match('^## Main info') then
+      insert_at = index + 1
+      while lines[insert_at] == '' do insert_at = insert_at + 1 end
+      break
+    end
+  end
+  if insert_at then
+    local existing = '\n' .. table.concat(lines, '\n') .. '\n'
+    local missing = {}
+    for _, line in ipairs(previous.request_main_info or {}) do
+      local label = tostring(line):match('^%*%*([^*]+):%*%*')
+      if label and not existing:find('\n**' .. label .. ':**', 1, true) then
+        table.insert(missing, line)
+      end
+    end
+    for index = #missing, 1, -1 do
+      table.insert(lines, insert_at, missing[index])
+    end
+    merged.lines = lines
+  end
+  return merged
+end
+
 function M.resolve_children(block, children, buffer_lines)
   if not block then
     return
   end
+  local previous_children = block.subagent_children or {}
   block.subagent_children = {}
   if type(children) ~= 'table' or #children == 0 then
     return
   end
   local resolved = {}
   local search_from = 1
-  for _, child in ipairs(children) do
+  for child_index, child in ipairs(children) do
+    child = merge_child_identity(previous_children[child_index], child)
     local header = child.header
     if header then
       for index = search_from, #buffer_lines do
