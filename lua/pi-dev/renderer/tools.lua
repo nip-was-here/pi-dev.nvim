@@ -366,6 +366,10 @@ local function readable_tool_result(tool_name, result, args, text, opts)
     if readable then
       return readable
     end
+    readable = subagent.status_text_parent_lines(text)
+    if readable then
+      return readable
+    end
     if args.action ~= nil and args.tasks == nil and args.chain == nil and args.task == nil and args.agent == nil then
       if vim.trim(normalize_line_endings(text)) ~= '' then
         return subagent.wrapped_result_lines(text)
@@ -422,7 +426,12 @@ end
 
 local function result_to_lines(result, tool_name, args, opts)
   opts = opts or {}
-  local text = content_to_text(result and result.content or '')
+  local text
+  if type(result) == 'string' then
+    text = result
+  else
+    text = content_to_text(result and result.content or '')
+  end
   if text == '' and type(result) == 'table' then
     text = content_to_text(result.output or result.text or result.result or '')
   end
