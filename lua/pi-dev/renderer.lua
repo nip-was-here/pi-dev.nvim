@@ -670,6 +670,11 @@ local function local_milliseconds()
   return math.floor(vim.uv.hrtime() / 1000000)
 end
 
+local function wall_clock_milliseconds()
+  local seconds, microseconds = vim.uv.gettimeofday()
+  return math.floor((seconds or os.time()) * 1000 + (microseconds or 0) / 1000)
+end
+
 local function permission_wait_overlap_milliseconds(start_ms, end_ms, clock)
   start_ms = tonumber(start_ms)
   end_ms = tonumber(end_ms)
@@ -2100,6 +2105,26 @@ local function render_tool_object_by_id(id)
   end
 end
 
+local function schedule_subagent_live_timing_refresh(id, object)
+  if not (object and object.status == 'Running' and subagent.has_running_tool and subagent.has_running_tool(object.partial_result)) then
+    return
+  end
+  if object.subagent_live_timing_refresh_scheduled then
+    return
+  end
+  object.subagent_live_timing_refresh_scheduled = true
+  vim.defer_fn(function()
+    object.subagent_live_timing_refresh_scheduled = false
+    local current = state.render.tool_objects and state.render.tool_objects[id]
+    if current ~= object or object.status ~= 'Running' or not subagent.has_running_tool(object.partial_result) then
+      return
+    end
+    object.partial_result = subagent.enrich_live_tool_timings(object, object.partial_result, wall_clock_milliseconds())
+    render_tool_object_by_id(id)
+    schedule_subagent_live_timing_refresh(id, object)
+  end, 1000)
+end
+
 local function clear_pending_tool_flush(id)
   local pending = state.render.pending_tool_flushes and state.render.pending_tool_flushes[id]
   if pending then
@@ -2245,10 +2270,20 @@ local function update_tool_object(event, status)
   end
 
   if event.partialResult ~= nil then
-    object.partial_result = event.partialResult
+    local partial_result = event.partialResult
+    if is_subagent_tool(object.name) and subagent.enrich_live_tool_timings then
+      local now_ms = event_timestamp_milliseconds(event, {}, true) or wall_clock_milliseconds()
+      partial_result = subagent.enrich_live_tool_timings(object, partial_result, now_ms)
+    end
+    object.partial_result = partial_result
   end
   if event.result ~= nil then
-    object.result = event.result
+    local result = event.result
+    if is_subagent_tool(object.name) and subagent.enrich_live_tool_timings then
+      local now_ms = event_timestamp_milliseconds(event, {}, true) or wall_clock_milliseconds()
+      result = subagent.enrich_live_tool_timings(object, result, now_ms)
+    end
+    object.result = result
     object.partial_result = nil
   end
   if status == 'Finished' and event.result ~= nil then
@@ -2285,6 +2320,7 @@ local function update_tool_object(event, status)
   end
   if status == 'Running' and event.partialResult ~= nil and event.result == nil then
     schedule_tool_object_flush(id, tool_object_flush_delay(object))
+    schedule_subagent_live_timing_refresh(id, object)
     return
   end
   clear_pending_tool_flush(id)

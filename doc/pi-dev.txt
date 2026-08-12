@@ -438,12 +438,15 @@ Focused subagent buffers ~
   The root chat header keeps root identity, runtime, status, role, model,
   thinking level, and session path. Each child block in its parent chat keeps
   available identity, role/skills, task, status, model/thinking, progress, and
-  complete command summaries provided by Pi. Scripted `runs.run`/`runs.all`
+  live completed/current command summaries provided by Pi. Tool durations update
+  while the current command runs and remain beside completed commands when their
+  start was observed. Scripted `runs.run`/`runs.all`
   children appear from the tool request before their first progress update.
   While at least one descendant is running, pi-dev.nvim opens a compact
   agent tree above the chat. It recursively includes active children,
   grandchildren, and deeper descendants. Each row contains agent identity, role
-  or skills when available, and ends with the latest/current command. Press
+  or skills when available, and ends with the latest/current command plus live
+  elapsed time when available. Press
   `Return` on `root-agent` to show the root chat, or on an active descendant row
   to show that agent chat. The tree is hidden when only the root remains. Its
   window height is capped at eight rows and scrolls for larger trees. Completed
