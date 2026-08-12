@@ -466,8 +466,40 @@ local function native_session_title(title, latest_user_title, opts)
   })
 end
 
+local function root_agent_info_lines()
+  local runtime = state.active_rpc_runtime and state.active_rpc_runtime() or nil
+  local status = state.statusline or {}
+  local function value(item)
+    return item ~= nil and item ~= vim.NIL and tostring(item) ~= '' and tostring(item) or '-'
+  end
+  return {
+    '**Agent:** root-agent',
+    '**Runtime:** ' .. value(state.rpc.active_key),
+    '**Status:** ' .. value(status.status),
+    '**Role:** ' .. value(status.role),
+    '**Model:** ' .. value(status.model),
+    '**Thinking:** ' .. value(status.thinking_level),
+    '**Session:** ' .. value((runtime and runtime.session_file) or state.session.current_file),
+  }
+end
+
 local function session_header_lines(title, _last_user_title)
-  return { '# ' .. (title or 'Pi.dev session'), '' }
+  local lines = { '# ' .. (title or 'Pi.dev session') }
+  vim.list_extend(lines, root_agent_info_lines())
+  table.insert(lines, '')
+  return lines
+end
+
+function M.refresh_root_agent_info()
+  local changed = false
+  with_output_buf(function(bufnr)
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 8, false)
+    if tostring(lines[1] or ''):match('^#%s+') and lines[2] == '**Agent:** root-agent' then
+      vim.api.nvim_buf_set_lines(bufnr, 1, 8, false, root_agent_info_lines())
+      changed = true
+    end
+  end)
+  return changed
 end
 
 local function session_title_has_summary(title)
@@ -1518,7 +1550,7 @@ function M.clear(title)
   reset_render_state()
   lock_session_title_if_summarized(state.ui.output_title)
   clear_output_folds()
-  replace_output_contents({ '# ' .. (title or 'Pi chat'), '' })
+  replace_output_contents(session_header_lines(title or 'Pi chat'))
 end
 
 local function apply_restored_tool_blocks(tool_blocks)

@@ -68,10 +68,11 @@ The Pi panel is a native Neovim layout. By default it opens on the right; a
 bottom layout is also configurable.
 
 - **Agent tree surface**: shown above the chat only while subagents are running.
-  It lists the root agent and active child subagents with each agent's current
-  action; press `Return` on a row to switch the chat to that agent. Completed
-  subagents stay available from their chat blocks. The tree is capped at eight
-  rows.
+  It lists the root agent and every active descendant recursively. Rows include
+  agent identity, role or skills when available, and the latest/current command;
+  press `Return` to switch the chat to that agent. Completed subagents stay
+  available from their chat blocks. The window height is capped at eight rows
+  and scrolls when the tree is larger.
 - **Output surface**: conversation, restored session history, Pi responses, tool
   output, service notices, errors, and large tree/waiting/subagent views.
 - **Input surface**: editable prompt buffer for normal user messages.
@@ -160,15 +161,20 @@ interactions, or unsent runtime-local drafts. `/new` follows the same reset rule
 Explicit `/reload` asks only when the active runtime has volatile runtime-local
 state; inactive branch runtimes remain attached.
 
-Subagent tool output stays compact in the parent chat. While subagents are
-running, a compact agent tree appears above the chat and lists `root-agent` plus
-active child subagents with their current action. Press `Return` in that tree to
-switch between the root chat and active child subagent chats. Put the cursor on a
-child subagent block and run `:PiDevSubagentOpen` or press `<leader>a]` to
-inspect any child, including completed subagents, in an isolated output buffer.
-`:PiDevSubagentParent` or `<leader>a[` returns one level up. When no subagents
-are running, the agent tree is hidden; session and branch tree pickers replace
-both the agent tree and chat while they are open.
+The root chat header keeps root identity, runtime, status, role, model,
+thinking level, and session path. Subagent tool output stays compact in the
+parent chat, but each child block keeps its available identity, role/skills,
+task, status, model/thinking, progress, and
+complete command summaries supplied by Pi. The focused child chat shows the full
+available child transcript and command history. While descendants are running, a
+compact agent tree appears above the chat and lists `root-agent` plus every active
+child, grandchild, and deeper descendant recursively. Each row ends with the
+latest/current command. Press `Return` in that tree to switch between agent
+chats. Put the cursor on a child subagent block and run `:PiDevSubagentOpen` or
+press `<leader>a]` to inspect any child, including completed subagents, in an
+isolated output buffer. `:PiDevSubagentParent` or `<leader>a[` returns one level
+up. When only the root agent remains, the agent tree is hidden; session and branch
+tree pickers replace both the agent tree and chat while they are open.
 
 ## Extension compatibility
 

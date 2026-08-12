@@ -23,6 +23,12 @@ local function output_foldclosed(line)
   return value
 end
 
+local function tool_detail_line(id)
+  local block = state.render.tool_blocks[id]
+  assert(block and block.start_line, 'missing tool block: ' .. tostring(id))
+  return block.start_line + 2
+end
+
 ui.focus_input()
 renderer.clear('Pi.dev permission fold test')
 local long_output = table.concat(vim.tbl_map(function(i) return 'pending line ' .. i end, vim.fn.range(1, 40)), '\n')
@@ -39,7 +45,8 @@ renderer.handle_event({
   partialResult = { content = { { type = 'text', text = long_output } } },
 })
 renderer.flush_pending_tool_renders()
-assert(output_foldclosed(5) == -1, 'running bash tool details should stay open before permission')
+local bash_detail_line = tool_detail_line('perm-tool')
+assert(output_foldclosed(bash_detail_line) == -1, 'running bash tool details should stay open before permission')
 
 renderer.clear('Pi.dev permission opens folded tool test')
 local long_input = table.concat(vim.tbl_map(function(i) return 'input line ' .. i end, vim.fn.range(1, 40)), '\n')
@@ -94,7 +101,8 @@ renderer.handle_event({
   partialResult = { content = { { type = 'text', text = long_output } } },
 })
 renderer.flush_pending_tool_renders()
-assert(output_foldclosed(5) == -1, 'running bash tool details should stay open before permission')
+bash_detail_line = tool_detail_line('perm-tool')
+assert(output_foldclosed(bash_detail_line) == -1, 'running bash tool details should stay open before permission')
 
 ext.handle_request({
   type = 'extension_ui_request',
@@ -105,12 +113,12 @@ ext.handle_request({
 })
 
 assert(vim.wait(1000, function()
-  return state.ui.interaction ~= nil and output_foldclosed(5) == -1
+  return state.ui.interaction ~= nil and output_foldclosed(bash_detail_line) == -1
 end), 'permission request should keep running bash tool details open')
 
 vim.api.nvim_feedkeys('1', 'xt', false)
 assert(vim.wait(1000, function()
-  return state.ui.interaction == nil and output_foldclosed(5) == -1
+  return state.ui.interaction == nil and output_foldclosed(bash_detail_line) == -1
 end), 'approving permission should keep running bash details open')
 
 renderer.handle_event({
@@ -120,14 +128,14 @@ renderer.handle_event({
   partialResult = { content = { { type = 'text', text = long_output .. '\nafter approval' } } },
 })
 renderer.flush_pending_tool_renders()
-assert(output_foldclosed(5) == -1, 'running bash details should stay open as work continues after approval')
+assert(output_foldclosed(bash_detail_line) == -1, 'running bash details should stay open as work continues after approval')
 renderer.handle_event({
   type = 'tool_execution_end',
   toolCallId = 'perm-tool',
   toolName = 'bash',
   result = { content = { { type = 'text', text = long_output .. '\nafter approval' } } },
 })
-assert(output_foldclosed(5) ~= -1, 'finished bash details should auto-fold after approval when over threshold')
+assert(output_foldclosed(bash_detail_line) ~= -1, 'finished bash details should auto-fold after approval when over threshold')
 LUA
 
 pidev_run_lua_file "$tmp_lua"

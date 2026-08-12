@@ -348,15 +348,26 @@ local function escaped_pattern(text)
 end
 
 local function parse_status_suffix(rest)
-  local head = tostring(rest or ''):gsub(',.*$', '')
+  rest = tostring(rest or '')
+  local head = rest:gsub(',.*$', '')
+  local model
+  local thinking
+  local runtime = rest:match('%(([^%)]*)%)')
+  if runtime then
+    thinking = runtime:match('thinking%s+([^,]+)')
+    local first = vim.trim(runtime:match('^([^,]+)') or '')
+    if first ~= '' and not first:match('^thinking%s+') then
+      model = first
+    end
+  end
   for _, status in ipairs(known_statuses) do
     local escaped = escaped_pattern(status)
     local agent = head:match('^(.-)%s+' .. escaped .. '%s*%(') or head:match('^(.-)%s+' .. escaped .. '$')
     if agent and vim.trim(agent) ~= '' then
-      return vim.trim(agent), status
+      return vim.trim(agent), status, model, thinking
     end
   end
-  return vim.trim(head), nil
+  return vim.trim(head), nil, model, thinking
 end
 
 local function parse_status_child_line(line)
@@ -366,12 +377,14 @@ local function parse_status_child_line(line)
     index, total, rest = line:match('^Agent%s+(%d+)/(%d+):%s+(.+)$')
   end
   if index then
-    local agent, status = parse_status_suffix(rest)
+    local agent, status, model, thinking = parse_status_suffix(rest)
     return {
       index = tonumber(index),
       total = tonumber(total),
       agent = agent ~= '' and agent or ('agent ' .. tostring(index)),
       status = status,
+      model = model,
+      thinking = thinking,
       raw = line,
     }
   end
@@ -466,7 +479,14 @@ function M.status_text_parent_lines(text)
     table.insert(lines, header)
     table.insert(lines, '')
     table.insert(lines, '###### Main info')
+    table.insert(lines, '**Agent:** ' .. tostring(item.agent or 'unknown'))
     table.insert(lines, '**Status:** ' .. tostring(item.status or 'unknown'))
+    if item.model then
+      table.insert(lines, '**Model:** ' .. tostring(item.model))
+    end
+    if item.thinking then
+      table.insert(lines, '**Thinking:** ' .. tostring(item.thinking))
+    end
     table.insert(lines, '**Details:** ' .. item.raw)
     for _, detail in ipairs(item.details or {}) do
       table.insert(lines, '- ' .. detail)
@@ -474,9 +494,16 @@ function M.status_text_parent_lines(text)
 
     local main_info = {
       '## Main info',
+      '**Agent:** ' .. tostring(item.agent or 'unknown'),
       '**Status:** ' .. tostring(item.status or 'unknown'),
-      '**Details:** ' .. item.raw,
     }
+    if item.model then
+      table.insert(main_info, '**Model:** ' .. tostring(item.model))
+    end
+    if item.thinking then
+      table.insert(main_info, '**Thinking:** ' .. tostring(item.thinking))
+    end
+    table.insert(main_info, '**Details:** ' .. item.raw)
     for _, detail in ipairs(item.details or {}) do
       table.insert(main_info, '- ' .. detail)
     end
@@ -485,6 +512,7 @@ function M.status_text_parent_lines(text)
       label = label,
       title = buffer_title(label),
       agent = item.agent,
+      role = item.agent,
       status = item.status,
       action = child_action_from_details(item.details, item.status),
       lines = child_buffer_lines(buffer_title(label), main_info, {}, item.status),
@@ -607,6 +635,154 @@ local function result_text_from_message(message)
     end
   end
   return ''
+end
+
+local function string_list(value)
+  if type(value) == 'string' and vim.trim(value) ~= '' then
+    return { vim.trim(value) }
+  end
+  local values = {}
+  for _, item in ipairs(type(value) == 'table' and value or {}) do
+    if item ~= nil and item ~= vim.NIL and vim.trim(tostring(item)) ~= '' then
+      table.insert(values, vim.trim(tostring(item)))
+    end
+  end
+  return values
+end
+
+local function tool_args_summary(args)
+  if args == nil or args == vim.NIL then
+    return nil
+  end
+  if type(args) == 'string' then
+    return compact_header_text(args, 220)
+  end
+  if type(args) ~= 'table' then
+    return compact_header_text(tostring(args), 220)
+  end
+  for _, field in ipairs({ 'command', 'path', 'file', 'filePath', 'query', 'url', 'pattern', 'prompt' }) do
+    local value = args[field]
+    if value ~= nil and value ~= vim.NIL and tostring(value) ~= '' then
+      return compact_header_text(tostring(value), 220)
+    end
+  end
+  local ok, encoded = pcall(vim.json.encode, args)
+  return compact_header_text(ok and encoded or vim.inspect(args), 220)
+end
+
+local function command_line(name, args)
+  local line = tostring(name or 'tool')
+  local summary = tool_args_summary(args)
+  if summary and summary ~= '' then
+    line = line .. ' ' .. summary
+  end
+  return line
+end
+
+local function command_summaries_from_messages(messages)
+  local commands = {}
+  for _, message in ipairs(type(messages) == 'table' and messages or {}) do
+    if type(message) == 'table' and message.role == 'assistant' and type(message.content) == 'table' then
+      for _, item in ipairs(message.content) do
+        if is_tool_call_item(item) then
+          table.insert(commands, command_line(tool_call_name(item), tool_call_args(item)))
+        end
+      end
+    elseif type(message) == 'table' and (message.type == 'tool_execution_start' or message.type == 'tool_execution_update') then
+      table.insert(commands, command_line(message.toolName or message.tool_name or message.name, message.args or message.arguments or message.input))
+    end
+  end
+  return commands
+end
+
+local function command_summaries(item, progress)
+  local commands = command_summaries_from_messages(type(item) == 'table' and item.messages or nil)
+  if type(item) == 'table' and type(item.toolCalls) == 'table' then
+    for _, tool in ipairs(item.toolCalls) do
+      local text
+      if type(tool) == 'table' then
+        text = first_string_field(tool, { 'expandedText', 'expanded_text', 'text', 'summary' })
+          or command_line(tool.name or tool.tool or tool.toolName, tool.args or tool.arguments or tool.input)
+      elseif tool ~= nil and tool ~= vim.NIL then
+        text = tostring(tool)
+      end
+      text = text and compact_header_text(text, 240) or nil
+      if text and not vim.tbl_contains(commands, text) then
+        table.insert(commands, text)
+      end
+    end
+  end
+  if #commands == 0 and type(progress) == 'table' then
+    for _, tool in ipairs(type(progress.recentTools) == 'table' and progress.recentTools or {}) do
+      if type(tool) == 'table' then
+        local line = tostring(tool.tool or tool.name or tool.toolName or 'tool')
+        if tool.args and tool.args ~= '' then
+          line = line .. ' - ' .. compact_header_text(tool.args, 220)
+        end
+        local duration = tool_duration(tool)
+        if duration then
+          line = line .. ' (' .. duration .. ')'
+        end
+        table.insert(commands, line)
+      end
+    end
+  end
+  if type(progress) == 'table' and progress.currentTool then
+    local current = tostring(progress.currentTool)
+    if progress.currentPath then
+      current = current .. ' ' .. tostring(progress.currentPath)
+    elseif progress.currentToolArgs then
+      current = current .. ' ' .. compact_header_text(progress.currentToolArgs, 220)
+    end
+    local matched = false
+    for index, command in ipairs(commands) do
+      if command == current or command == current .. ' (running)' then
+        commands[index] = current .. ' (running)'
+        matched = true
+        break
+      end
+    end
+    if not matched then
+      table.insert(commands, current .. ' (running)')
+    end
+  end
+  return commands
+end
+
+local function append_commands(lines, commands)
+  if type(commands) ~= 'table' or #commands == 0 then
+    return
+  end
+  table.insert(lines, '**Commands:**')
+  table.insert(lines, '```text')
+  for index, command in ipairs(commands) do
+    table.insert(lines, tostring(index) .. '. ' .. tostring(command))
+  end
+  table.insert(lines, '```')
+end
+
+local function append_agent_info(lines, item, progress, status, agent, opts)
+  opts = opts or {}
+  local function field(label, value)
+    if value ~= nil and value ~= vim.NIL and vim.trim(tostring(value)) ~= '' then
+      table.insert(lines, ('**%s:** %s'):format(label, tostring(value)))
+    end
+  end
+  field('Name', opts.name)
+  field('Agent', agent)
+  local role = type(item) == 'table' and first_string_field(item, { 'role' }) or nil
+  if role and role ~= agent then
+    field('Role', role)
+  end
+  local skills = string_list((type(item) == 'table' and item.skills) or (type(progress) == 'table' and progress.skills))
+  if #skills > 0 then
+    field('Skills', table.concat(skills, ', '))
+  end
+  field('Status', status)
+  field('Model', (type(item) == 'table' and item.model) or (type(progress) == 'table' and progress.model))
+  field('Thinking', (type(item) == 'table' and item.thinking) or (type(progress) == 'table' and progress.thinking))
+  field('Session', type(item) == 'table' and item.sessionFile or nil)
+  field('Transcript', type(item) == 'table' and item.transcriptPath or nil)
 end
 
 local function transcript_lines_from_progress(progress)
@@ -744,6 +920,162 @@ function M.args_to_lines(args)
   return lines
 end
 
+local nested_terminal_statuses = {
+  cancelled = true,
+  canceled = true,
+  complete = true,
+  completed = true,
+  done = true,
+  detached = true,
+  error = true,
+  failed = true,
+  failure = true,
+  interrupted = true,
+  rejected = true,
+  stopped = true,
+  success = true,
+  succeeded = true,
+  ['timed out'] = true,
+  timeout = true,
+}
+
+local function nested_action(item)
+  if type(item) ~= 'table' then
+    return 'idle'
+  end
+  local action = item.currentTool
+  if action and item.currentPath then
+    action = tostring(action) .. ' ' .. tostring(item.currentPath)
+  elseif action and item.currentToolArgs then
+    action = tostring(action) .. ' ' .. compact_header_text(item.currentToolArgs, 120)
+  end
+  return tostring(action or item.activityState or item.state or item.status or 'idle')
+end
+
+local nested_child_from_summary
+
+local function child_main_info_lines(child)
+  local lines = {}
+  local started = false
+  for _, line in ipairs(child and child.lines or {}) do
+    if tostring(line):match('^## Main info') then
+      started = true
+    elseif started and tostring(line):match('^## Result') then
+      break
+    elseif started and not tostring(line):match('^>%s+_Subagent done') then
+      table.insert(lines, line)
+    end
+  end
+  return lines
+end
+
+local function nested_children_from(item, parent_key)
+  local children = {}
+  local function append_summaries(summaries)
+    for index, summary in ipairs(type(summaries) == 'table' and summaries or {}) do
+      local child = nested_child_from_summary(summary, tostring(parent_key or 'child') .. '/' .. tostring(index))
+      if child then
+        table.insert(children, child)
+      end
+    end
+  end
+  append_summaries(type(item) == 'table' and item.children or nil)
+  for index, step in ipairs(type(item) == 'table' and type(item.steps) == 'table' and item.steps or {}) do
+    if type(step) == 'table' then
+      local summary = vim.deepcopy(step)
+      summary.runId = summary.runId or ((item.runId or item.agent or 'workflow') .. '/step-' .. tostring(index))
+      local child = nested_child_from_summary(summary, tostring(parent_key or 'child') .. '/step-' .. tostring(index))
+      if child then
+        table.insert(children, child)
+      end
+    end
+  end
+  return children
+end
+
+nested_child_from_summary = function(item, stable_key)
+  if type(item) ~= 'table' then
+    return nil
+  end
+  local agent = first_string_field(item, { 'agent', 'role' })
+  if not agent and type(item.agents) == 'table' and #item.agents == 1 then
+    agent = tostring(item.agents[1])
+  end
+  local name = first_string_field(item, { 'runId', 'name', 'id' }) or agent or 'subagent'
+  local status = tostring(item.state or item.status or 'running')
+  local progress = {
+    status = status,
+    currentTool = item.currentTool,
+    currentToolArgs = item.currentToolArgs,
+    currentPath = item.currentPath,
+    toolCount = item.toolCount,
+    turnCount = item.turnCount,
+    tokens = type(item.totalTokens) == 'number' and item.totalTokens or nil,
+    model = item.model,
+    thinking = item.thinking,
+    recentTools = {},
+  }
+  local main_info = { '## Main info' }
+  append_agent_info(main_info, item, progress, status, agent, { name = name })
+  local task = first_present_field(item, { 'task', 'prompt', 'request', 'goal' })
+  if task then
+    table.insert(main_info, '**Task:** ' .. compact_header_text(task, 160))
+  end
+  local commands = command_summaries(item, progress)
+  append_commands(main_info, commands)
+  append_progress(main_info, progress, { include_recent_tools = #commands == 0 })
+  local result_lines = transcript_lines_from_messages(item.messages, progress) or transcript_lines_from_progress(progress) or {}
+  local body = first_string_field(item, { 'response', 'output', 'text', 'summary', 'final', 'finalOutput', 'finalResult', 'final_result', 'final_output', 'message' })
+  if #result_lines == 0 and body then
+    append_body(result_lines, body, { min_heading_level = 2, max_heading_level = 6 })
+  end
+  local children = nested_children_from(item, stable_key)
+  if #children > 0 then
+    table.insert(result_lines, '## Descendants')
+    for index, child in ipairs(children) do
+      table.insert(result_lines, '')
+      table.insert(result_lines, '##### Agent ' .. tostring(index) .. '/' .. tostring(#children) .. ': ' .. tostring(child.name or child.title) .. ' - ' .. tostring(child.status or 'unknown'))
+      table.insert(result_lines, '')
+      table.insert(result_lines, '###### Main info')
+      vim.list_extend(result_lines, child_main_info_lines(child))
+    end
+  end
+  local latest_command = commands[#commands]
+  if latest_command then
+    latest_command = latest_command:gsub('%s+%(running%)$', '')
+  end
+  return {
+    header = '##### ' .. name .. ' - ' .. status,
+    key = stable_key,
+    label = name,
+    name = name,
+    title = name,
+    agent = agent,
+    role = first_string_field(item, { 'role' }) or agent,
+    skills = string_list(item.skills),
+    status = status,
+    action = item.currentTool and nested_action(item) or latest_command or nested_action(item),
+    children = children,
+    active = not nested_terminal_statuses[status:lower()],
+    lines = child_buffer_lines(name, main_info, result_lines, status),
+  }
+end
+
+local function append_nested_child_blocks(lines, children)
+  if type(children) ~= 'table' or #children == 0 then
+    return
+  end
+  table.insert(lines, '')
+  table.insert(lines, '## Descendants')
+  for index, child in ipairs(children) do
+    table.insert(lines, '')
+    table.insert(lines, '##### Agent ' .. tostring(index) .. '/' .. tostring(#children) .. ': ' .. tostring(child.name or child.title) .. ' - ' .. tostring(child.status or 'unknown'))
+    table.insert(lines, '')
+    table.insert(lines, '###### Main info')
+    vim.list_extend(lines, child_main_info_lines(child))
+  end
+end
+
 function M.result_to_lines(source, text, opts)
   opts = opts or {}
   if type(source) ~= 'table' then
@@ -777,6 +1109,8 @@ function M.result_to_lines(source, text, opts)
       table.insert(lines, '###### Main info')
 
       local main_info = { '## Main info' }
+      append_agent_info(lines, item, progress, status, agent)
+      append_agent_info(main_info, item, progress, status, agent)
       local task = first_present_field(item, { 'task', 'prompt', 'request' })
       local current_action = nil
       if type(progress) == 'table' and progress.currentTool then
@@ -787,14 +1121,21 @@ function M.result_to_lines(source, text, opts)
           current_action = current_action .. ' ' .. compact_header_text(progress.currentToolArgs, 80)
         end
       end
-      current_action = current_action or (task and compact_header_text(task, 100)) or status
       if task then
         local task_line = '**Task:** ' .. compact_header_text(task, 160)
         table.insert(lines, task_line)
         table.insert(main_info, task_line)
       end
+      local commands = command_summaries(item, progress)
+      local latest_command = commands[#commands]
+      if latest_command then
+        latest_command = latest_command:gsub('%s+%(running%)$', '')
+      end
+      current_action = current_action or latest_command or (task and compact_header_text(task, 100)) or status
+      append_commands(lines, commands)
+      append_commands(main_info, commands)
       local progress_lines = {}
-      append_progress(progress_lines, progress, { include_recent_output = false })
+      append_progress(progress_lines, progress, { include_recent_output = false, include_recent_tools = #commands == 0 })
       vim.list_extend(lines, progress_lines)
       vim.list_extend(main_info, progress_lines)
       if item.error then
@@ -844,13 +1185,21 @@ function M.result_to_lines(source, text, opts)
       end
 
       local title = buffer_title(label)
+      local child_key = 'agent-' .. tostring(item.index or index)
+      local nested_children = nested_children_from(item, child_key)
+      append_nested_child_blocks(result_lines, nested_children)
       table.insert(children, {
         header = header,
+        key = child_key,
         label = label,
+        name = title,
         title = title,
         agent = agent,
+        role = first_string_field(item, { 'role' }) or agent,
+        skills = string_list(item.skills or (type(progress) == 'table' and progress.skills)),
         status = status,
         action = current_action,
+        children = nested_children,
         lines = child_buffer_lines(title, main_info, result_lines, status),
       })
     else

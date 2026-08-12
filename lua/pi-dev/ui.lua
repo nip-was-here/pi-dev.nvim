@@ -896,6 +896,7 @@ local function open_subagent_child(child)
     title = child.title or child.label or 'subagent',
     parent_tool_call_id = child.parent_tool_call_id,
     child_header = child.header,
+    child_key = child.key,
   }
   view.output_title = subagent.title_text(view.title, depth)
   local bufnr_new = subagent.ensure_view_buffer(view, state.ui, buffers.setup_buffer, config.options.ui.output_filetype)
@@ -914,6 +915,22 @@ local function open_subagent_child(child)
 end
 
 local function root_agent_action()
+  local object = state.render.tool_objects and state.render.tool_objects[state.render.last_tool_id]
+  if type(object) == 'table' and object.status == 'Running' then
+    local name = tostring(object.name or 'tool')
+    local detail
+    if subagent.is_tool(name) then
+      detail = subagent.summary(object.args)
+    elseif type(object.args) == 'table' then
+      detail = object.args.command or object.args.path or object.args.file or object.args.filePath or object.args.query or object.args.url
+    elseif object.args ~= nil and object.args ~= vim.NIL then
+      detail = tostring(object.args)
+    end
+    if detail and vim.trim(tostring(detail)) ~= '' then
+      return name .. ' ' .. vim.trim(tostring(detail):gsub('%s+', ' '))
+    end
+    return name
+  end
   local info = state.statusline or {}
   if info.waiting_input then
     return 'waiting input'
@@ -928,11 +945,27 @@ local function root_agent_action()
 end
 
 local function child_agent_name(child)
-  local name = child and (child.agent or child.title or child.label) or 'subagent'
+  local name = child and (child.name or child.title or child.label or child.agent) or 'subagent'
   name = tostring(name or 'subagent')
   name = name:gsub('^Agent%s+%d+/%d+:%s*', ''):gsub('%s+%-%s+.+$', '')
   name = vim.trim(name)
   return name ~= '' and name or 'subagent'
+end
+
+local function child_agent_qualifier(child, name)
+  local values = {}
+  local role = child and (child.role or child.agent) or nil
+  role = vim.trim(tostring(role or ''))
+  if role ~= '' and role ~= tostring(name or '') then
+    table.insert(values, role)
+  end
+  for _, skill in ipairs(child and type(child.skills) == 'table' and child.skills or {}) do
+    skill = vim.trim(tostring(skill or ''))
+    if skill ~= '' and not vim.tbl_contains(values, skill) then
+      table.insert(values, skill)
+    end
+  end
+  return #values > 0 and table.concat(values, ', ') or nil
 end
 
 local function child_agent_action(child)
@@ -947,10 +980,13 @@ local terminal_subagent_statuses = {
   ['complete'] = true,
   ['completed'] = true,
   ['done'] = true,
+  ['detached'] = true,
   ['error'] = true,
   ['failed'] = true,
   ['failure'] = true,
   ['interrupted'] = true,
+  ['rejected'] = true,
+  ['stopped'] = true,
   ['success'] = true,
   ['succeeded'] = true,
   ['timed out'] = true,
@@ -958,13 +994,21 @@ local terminal_subagent_statuses = {
 }
 
 local function subagent_tree_child_active(child)
+  if child and child.active ~= nil then
+    return child.active == true
+  end
   local status = child and child.status or nil
   status = vim.trim(tostring(status or '')):lower()
   return status == '' or not terminal_subagent_statuses[status]
 end
 
-local function subagent_tree_label(prefix, name, action, max_width)
-  local text = tostring(prefix or '') .. tostring(name or 'agent') .. ' - ' .. tostring(action or '')
+local function subagent_tree_label(prefix, name, qualifier, action, max_width, depth)
+  local identity = tostring(name or 'agent')
+  if qualifier and qualifier ~= '' then
+    identity = identity .. ' [' .. tostring(qualifier) .. ']'
+  end
+  local indent = string.rep('  ', math.max(0, (tonumber(depth) or 0) - 1))
+  local text = tostring(prefix or '') .. indent .. identity .. ' - ' .. tostring(action or '')
   return format.truncate_display(text, math.max(1, tonumber(max_width) or 80))
 end
 
@@ -990,24 +1034,42 @@ local function subagent_tree_items()
     return {}
   end
   local items = {}
+  local function append_child(child, parent_tool_call_id, depth)
+    if type(child) ~= 'table' then
+      return
+    end
+    local copy = vim.deepcopy(child)
+    copy.parent_tool_call_id = parent_tool_call_id
+    local name = child_agent_name(copy)
+    if subagent_tree_child_active(copy) then
+      table.insert(items, {
+        kind = 'subagent',
+        name = name,
+        qualifier = child_agent_qualifier(copy, name),
+        action = child_agent_action(copy),
+        depth = depth,
+        child = copy,
+      })
+    end
+    for _, nested in ipairs(child.children or {}) do
+      append_child(nested, parent_tool_call_id, depth + 1)
+    end
+  end
   for _, item in ipairs(blocks) do
     for _, child in ipairs(item.block.subagent_children or {}) do
-      if subagent_tree_child_active(child) then
-        local copy = vim.deepcopy(child)
-        copy.parent_tool_call_id = item.id
-        table.insert(items, {
-          kind = 'subagent',
-          name = child_agent_name(copy),
-          action = child_agent_action(copy),
-          child = copy,
-        })
-      end
+      append_child(child, item.id, 1)
     end
   end
   if #items == 0 then
     return {}
   end
-  table.insert(items, 1, { kind = 'root', name = 'root-agent', action = root_agent_action() })
+  table.insert(items, 1, {
+    kind = 'root',
+    name = 'root-agent',
+    qualifier = vim.trim(tostring(state.statusline.role or '')) ~= '' and tostring(state.statusline.role) or nil,
+    action = root_agent_action(),
+    depth = 0,
+  })
   return items
 end
 
@@ -1068,14 +1130,15 @@ function M.refresh_subagent_tree()
   local width = valid_win(state.ui.output_win) and format.window_text_width(state.ui.output_win, vim.o.columns) or vim.o.columns
   local lines = {}
   local active_header = state.ui.subagent_view and state.ui.subagent_view.child_header or nil
+  local active_key = state.ui.subagent_view and state.ui.subagent_view.child_key or nil
   for _, item in ipairs(items) do
     local active = false
     if item.kind == 'root' then
       active = state.ui.subagent_view == nil
-    elseif item.child and active_header then
-      active = item.child.header == active_header
+    elseif item.child and (active_key or active_header) then
+      active = active_key and item.child.key == active_key or (not active_key and item.child.header == active_header)
     end
-    table.insert(lines, subagent_tree_label(active and '> ' or '  ', item.name, item.action, width))
+    table.insert(lines, subagent_tree_label(active and '> ' or '  ', item.name, item.qualifier, item.action, width, item.depth))
   end
   set_buffer_lines(state.ui.subagent_tree_buf, lines, 'text')
   set_subagent_tree_keymaps(state.ui.subagent_tree_buf)
@@ -1165,15 +1228,28 @@ local function refresh_subagent_view(view, tool_call_id, children)
   if not view or view.parent_tool_call_id ~= tool_call_id then
     return false
   end
-  for _, child in ipairs(children or {}) do
-    if child.header == view.child_header or child.title == view.title or child.label == view.title then
-      view.title = child.title or child.label or view.title or 'subagent'
-      view.child_header = child.header or view.child_header
-      view.output_title = subagent.title_text(view.title, view.depth)
-      local bufnr = subagent.ensure_view_buffer(view, state.ui, buffers.setup_buffer, config.options.ui.output_filetype)
-      set_buffer_lines(bufnr, subagent.replace_title(child.lines or {}, view.title, view.depth), config.options.ui.output_filetype)
-      return true
+  local function matching_child(items)
+    for _, child in ipairs(items or {}) do
+      if (view.child_key and child.key == view.child_key)
+        or (not view.child_key and (child.header == view.child_header or child.title == view.title or child.label == view.title or child.name == view.title))
+      then
+        return child
+      end
+      local nested = matching_child(child.children)
+      if nested then
+        return nested
+      end
     end
+  end
+  local child = matching_child(children)
+  if child then
+    view.title = child.title or child.label or child.name or view.title or 'subagent'
+    view.child_header = child.header or view.child_header
+    view.child_key = child.key or view.child_key
+    view.output_title = subagent.title_text(view.title, view.depth)
+    local bufnr = subagent.ensure_view_buffer(view, state.ui, buffers.setup_buffer, config.options.ui.output_filetype)
+    set_buffer_lines(bufnr, subagent.replace_title(child.lines or {}, view.title, view.depth), config.options.ui.output_filetype)
+    return true
   end
   return false
 end
