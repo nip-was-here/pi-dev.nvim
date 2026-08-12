@@ -8,6 +8,7 @@ ci/pr_precommit_workflow.sh	0.5s
 ci/release_workflow.sh	0.5s
 commands/native_pi_commands_and_input.sh	0.6s
 commands/registry_and_slash.sh	0.6s
+commands/role_fallback.sh	0.5s
 completion/context_parse.sh	0.5s
 completion/rpc_merge.sh	0.5s
 config/branches.sh	0.5s
