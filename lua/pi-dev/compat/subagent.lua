@@ -207,6 +207,27 @@ local function tool_duration(tool)
   return nil
 end
 
+local function current_tool_duration(progress)
+  return type(progress) == 'table' and format_duration_ms(progress.currentToolDurationMs or progress.current_tool_duration_ms) or nil
+end
+
+local function current_tool_action(progress, max_chars)
+  if type(progress) ~= 'table' or not progress.currentTool then
+    return nil
+  end
+  local action = tostring(progress.currentTool)
+  if progress.currentPath then
+    action = action .. ' ' .. tostring(progress.currentPath)
+  elseif progress.currentToolArgs then
+    action = action .. ' ' .. compact_header_text(progress.currentToolArgs, max_chars or 120)
+  end
+  local duration = current_tool_duration(progress)
+  if duration then
+    action = action .. ' (' .. duration .. ')'
+  end
+  return action
+end
+
 local function recent_tool_line(tool, index)
   if type(tool) ~= 'table' then
     return nil
@@ -239,6 +260,10 @@ local function append_progress(lines, progress, opts)
       current = current .. ' ' .. inline_code(progress.currentPath)
     elseif progress.currentToolArgs then
       current = current .. ' ' .. compact_header_text(progress.currentToolArgs, 100)
+    end
+    local duration = current_tool_duration(progress)
+    if duration then
+      current = current .. ' (' .. duration .. ')'
     end
     table.insert(lines, '**Current tool:** ' .. current)
   end
@@ -695,6 +720,165 @@ local function command_summaries_from_messages(messages)
   return commands
 end
 
+local function live_progress_entries(source)
+  source = type(source) == 'table' and (source.details or source) or nil
+  if type(source) ~= 'table' then
+    return {}
+  end
+  local entries = {}
+  local seen = {}
+  local function append(progress, key, index, agent)
+    if type(progress) ~= 'table' or seen[progress] then
+      return
+    end
+    seen[progress] = true
+    table.insert(entries, { progress = progress, key = key, index = progress.index or index, agent = progress.agent or agent })
+  end
+  local function append_nested(items, parent_key)
+    for index, item in ipairs(type(items) == 'table' and items or {}) do
+      if type(item) == 'table' then
+        local key = parent_key .. '/' .. tostring(item.runId or item.id or item.workflowKey or index)
+        append(item, key, index - 1, item.agent)
+        append_nested(item.children, key .. '/children')
+        append_nested(item.steps, key .. '/steps')
+      end
+    end
+  end
+  for index, item in ipairs(type(source.results) == 'table' and source.results or {}) do
+    local key = 'result-' .. tostring(index - 1)
+    append(type(item) == 'table' and item.progress or nil, key, index - 1, type(item) == 'table' and item.agent or nil)
+    if type(item) == 'table' then
+      append_nested(item.children, key .. '/children')
+      append_nested(item.steps, key .. '/steps')
+    end
+  end
+  for index, progress in ipairs(type(source.progress) == 'table' and source.progress or {}) do
+    append(progress, 'result-' .. tostring(index - 1), index - 1, type(progress) == 'table' and progress.agent or nil)
+  end
+  return entries
+end
+
+local function timing_tool_key(tool, args, end_ms)
+  return table.concat({ tostring(tool or ''), tostring(args or ''), tostring(end_ms or '') }, '\0')
+end
+
+function M.has_running_tool(source)
+  for _, entry in ipairs(live_progress_entries(source)) do
+    if entry.progress.currentTool then
+      return true
+    end
+  end
+  return false
+end
+
+function M.enrich_live_tool_timings(block, source, now_ms)
+  if not block or type(source) ~= 'table' then
+    return source
+  end
+  local enriched = vim.deepcopy(source)
+  block.subagent_live_tool_timings = block.subagent_live_tool_timings or {}
+  for _, entry in ipairs(live_progress_entries(enriched)) do
+    local progress = entry.progress
+    local child_key = tostring(entry.key or (entry.index ~= nil and entry.index or entry.agent or 0))
+    local timing = block.subagent_live_tool_timings[child_key] or { completed = {}, completed_tools = {}, completed_order = {} }
+    timing.completed = timing.completed or {}
+    timing.completed_tools = timing.completed_tools or {}
+    timing.completed_order = timing.completed_order or {}
+    local previous = timing.current
+    local previous_completed = false
+    local function matching_synthetic(tool)
+      for index = #timing.completed_order, 1, -1 do
+        local key = timing.completed_order[index]
+        local candidate = timing.completed_tools[key]
+        if candidate and candidate.__pi_synthetic == true
+          and tostring(candidate.tool or candidate.name or candidate.toolName or '') == tostring(tool.tool or tool.name or tool.toolName or '')
+          and tostring(candidate.args or '') == tostring(tool.args or '')
+        then
+          return key, candidate, index
+        end
+      end
+    end
+    local function remember_completed(tool, end_ms, duration_ms, synthetic)
+      local old_key, old_tool, old_index
+      if not synthetic then
+        old_key, old_tool, old_index = matching_synthetic(tool)
+      end
+      if not duration_ms and old_tool and end_ms and tonumber(old_tool.__pi_started_at_ms) then
+        duration_ms = math.max(0, end_ms - tonumber(old_tool.__pi_started_at_ms))
+      end
+      local key = timing_tool_key(tool.tool or tool.name or tool.toolName, tool.args, end_ms)
+      if old_key and old_key ~= key then
+        timing.completed[old_key] = nil
+        timing.completed_tools[old_key] = nil
+        table.remove(timing.completed_order, old_index)
+      end
+      if duration_ms then
+        tool.durationMs = duration_ms
+        timing.completed[key] = duration_ms
+      end
+      if synthetic then
+        tool.__pi_synthetic = true
+        tool.__pi_started_at_ms = previous and previous.started_at_ms or nil
+      end
+      if not timing.completed_tools[key] then
+        if old_index then
+          table.insert(timing.completed_order, old_index, key)
+        else
+          table.insert(timing.completed_order, key)
+        end
+      end
+      timing.completed_tools[key] = vim.deepcopy(tool)
+    end
+    for _, tool in ipairs(type(progress.recentTools) == 'table' and progress.recentTools or {}) do
+      if type(tool) == 'table' then
+        local end_ms = tonumber(tool.endMs or tool.end_ms)
+        local key = timing_tool_key(tool.tool or tool.name or tool.toolName, tool.args, end_ms)
+        local duration_ms = tonumber(tool.durationMs or tool.duration_ms) or timing.completed[key]
+        local matches_previous = previous
+          and tostring(previous.tool or '') == tostring(tool.tool or tool.name or tool.toolName or '')
+          and tostring(previous.args or '') == tostring(tool.args or '')
+        if not duration_ms and matches_previous and end_ms then
+          duration_ms = math.max(0, end_ms - previous.started_at_ms)
+        end
+        previous_completed = previous_completed or matches_previous == true
+        remember_completed(tool, end_ms, duration_ms)
+      end
+    end
+    local current_args = progress.currentToolArgs or progress.currentPath or ''
+    local current_changed = previous and (not progress.currentTool
+      or tostring(previous.tool) ~= tostring(progress.currentTool)
+      or tostring(previous.args or '') ~= tostring(current_args))
+    if current_changed and not previous_completed then
+      local end_ms = tonumber(progress.currentToolStartedAt or progress.current_tool_started_at) or tonumber(now_ms)
+      if end_ms then
+        remember_completed({ tool = previous.tool, args = previous.args, endMs = end_ms }, end_ms, math.max(0, end_ms - previous.started_at_ms), true)
+      end
+    end
+    if progress.currentTool then
+      local started_at_ms = tonumber(progress.currentToolStartedAt or progress.current_tool_started_at)
+      if previous and tostring(previous.tool) == tostring(progress.currentTool) and tostring(previous.args or '') == tostring(current_args) then
+        started_at_ms = started_at_ms or previous.started_at_ms
+      end
+      started_at_ms = started_at_ms or tonumber(now_ms)
+      timing.current = { tool = progress.currentTool, args = current_args, started_at_ms = started_at_ms }
+      if tonumber(now_ms) and started_at_ms then
+        progress.currentToolDurationMs = math.max(0, tonumber(now_ms) - started_at_ms)
+      end
+    else
+      timing.current = nil
+    end
+    progress.completedTools = {}
+    for _, key in ipairs(timing.completed_order) do
+      local tool = vim.deepcopy(timing.completed_tools[key])
+      tool.__pi_synthetic = nil
+      tool.__pi_started_at_ms = nil
+      table.insert(progress.completedTools, tool)
+    end
+    block.subagent_live_tool_timings[child_key] = timing
+  end
+  return enriched
+end
+
 local function command_summaries(item, progress)
   local commands = command_summaries_from_messages(type(item) == 'table' and item.messages or nil)
   if type(item) == 'table' and type(item.toolCalls) == 'table' then
@@ -712,38 +896,51 @@ local function command_summaries(item, progress)
       end
     end
   end
-  if #commands == 0 and type(progress) == 'table' then
-    for _, tool in ipairs(type(progress.recentTools) == 'table' and progress.recentTools or {}) do
+  if type(progress) == 'table' then
+    local completed = type(progress.completedTools) == 'table' and progress.completedTools or progress.recentTools
+    for _, tool in ipairs(type(completed) == 'table' and completed or {}) do
       if type(tool) == 'table' then
-        local line = tostring(tool.tool or tool.name or tool.toolName or 'tool')
-        if tool.args and tool.args ~= '' then
-          line = line .. ' - ' .. compact_header_text(tool.args, 220)
-        end
+        local name = tostring(tool.tool or tool.name or tool.toolName or 'tool')
+        local args = tool.args and tool.args ~= '' and compact_header_text(tool.args, 220) or nil
         local duration = tool_duration(tool)
-        if duration then
-          line = line .. ' (' .. duration .. ')'
+        local matched = false
+        for index = #commands, 1, -1 do
+          local command = tostring(commands[index])
+          if command:find(name, 1, true) == 1 and (not args or command:find(args, 1, true)) then
+            if duration and not command:match('%s+%([^)]-%)$') then
+              commands[index] = command .. ' (' .. duration .. ')'
+            end
+            matched = true
+            break
+          end
         end
-        table.insert(commands, line)
+        if not matched then
+          local line = name
+          if args then line = line .. ' - ' .. args end
+          if duration then line = line .. ' (' .. duration .. ')' end
+          table.insert(commands, line)
+        end
       end
     end
   end
   if type(progress) == 'table' and progress.currentTool then
-    local current = tostring(progress.currentTool)
-    if progress.currentPath then
-      current = current .. ' ' .. tostring(progress.currentPath)
-    elseif progress.currentToolArgs then
-      current = current .. ' ' .. compact_header_text(progress.currentToolArgs, 220)
+    local current = current_tool_action(progress, 220)
+    local running_suffix = current_tool_duration(progress) and ', running)' or ' (running)'
+    if current_tool_duration(progress) then
+      current = current:gsub('%)$', running_suffix)
+    else
+      current = current .. running_suffix
     end
     local matched = false
     for index, command in ipairs(commands) do
-      if command == current or command == current .. ' (running)' then
-        commands[index] = current .. ' (running)'
+      if command == current or command == current:gsub('%s+%([^)]-running%)$', '') then
+        commands[index] = current
         matched = true
         break
       end
     end
     if not matched then
-      table.insert(commands, current .. ' (running)')
+      table.insert(commands, current)
     end
   end
   return commands
@@ -1116,13 +1313,7 @@ local function nested_action(item)
   if type(item) ~= 'table' then
     return 'idle'
   end
-  local action = item.currentTool
-  if action and item.currentPath then
-    action = tostring(action) .. ' ' .. tostring(item.currentPath)
-  elseif action and item.currentToolArgs then
-    action = tostring(action) .. ' ' .. compact_header_text(item.currentToolArgs, 120)
-  end
-  return tostring(action or item.activityState or item.state or item.status or 'idle')
+  return tostring(current_tool_action(item, 120) or item.activityState or item.state or item.status or 'idle')
 end
 
 local nested_child_from_summary
@@ -1180,6 +1371,7 @@ nested_child_from_summary = function(item, stable_key)
     status = status,
     currentTool = item.currentTool,
     currentToolArgs = item.currentToolArgs,
+    currentToolDurationMs = item.currentToolDurationMs,
     currentPath = item.currentPath,
     toolCount = item.toolCount,
     turnCount = item.turnCount,
@@ -1285,15 +1477,7 @@ function M.result_to_lines(source, text, opts)
       append_agent_info(lines, item, progress, status, agent)
       append_agent_info(main_info, item, progress, status, agent)
       local task = first_present_field(item, { 'task', 'prompt', 'request' })
-      local current_action = nil
-      if type(progress) == 'table' and progress.currentTool then
-        current_action = tostring(progress.currentTool)
-        if progress.currentPath then
-          current_action = current_action .. ' ' .. tostring(progress.currentPath)
-        elseif progress.currentToolArgs then
-          current_action = current_action .. ' ' .. compact_header_text(progress.currentToolArgs, 80)
-        end
-      end
+      local current_action = current_tool_action(progress, 80)
       if task then
         local task_line = '**Task:** ' .. compact_header_text(task, 160)
         table.insert(lines, task_line)

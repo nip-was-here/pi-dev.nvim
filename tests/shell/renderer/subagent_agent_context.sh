@@ -176,7 +176,7 @@ assert(parent:find('**Thinking:** high', 1, true), parent)
 assert(parent:find('**Commands:**', 1, true), parent)
 assert(parent:find('1. read lua/pi-dev/config.lua', 1, true), parent)
 assert(parent:find('2. edit lua/pi-dev/compat/subagent.lua', 1, true), parent)
-assert(parent:find('3. bash echo current command (running)', 1, true), parent)
+assert(parent:find('3. bash echo current command (0ms, running)', 1, true), parent)
 assert(parent:find('1. read lua/pi-dev/ui.lua', 1, true), parent)
 assert(parent:find('2. bash echo latest completed command', 1, true), parent)
 

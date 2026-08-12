@@ -57,6 +57,7 @@ renderer/restored_subagent_buffer_navigation.sh	0.6s
 renderer/subagent_action_result.sh	0.6s
 renderer/subagent_agent_context.sh	0.6s
 renderer/subagent_live_progress.sh	0.6s
+renderer/subagent_live_tool_timing.sh	1.6s
 renderer/subagent_workflow_start_context.sh	0.6s
 renderer/subagent_buffer_navigation.sh	0.6s
 renderer/subagent_open_live_refresh.sh	0.6s
