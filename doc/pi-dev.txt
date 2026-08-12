@@ -112,10 +112,12 @@ Pi panel ~
 
 Agent tree surface ~
   A compact tree shown above the chat only while subagents are running. It lists
-  the root agent and active child subagents with each agent's current action.
-  Completed subagents stay available from their chat blocks, not this tree. The
-  window is capped at eight rows. Press `Return` on a row to switch the chat to
-  the root agent or selected active subagent. Session, tree, and waiting pickers
+  the root agent and every active descendant recursively. Rows include identity,
+  role or skills when available, and the latest/current command. Completed
+  subagents stay available from their chat blocks, not this tree. The window
+  height is capped at eight rows and scrolls for larger trees. Press `Return` on
+  a row to switch the chat to the root agent or selected active subagent. When
+  only the root remains the tree is hidden. Session, tree, and waiting pickers
   replace the agent tree and chat while they are open.
 
 Output surface ~
@@ -433,18 +435,25 @@ Waiting navigation ~
   that branch and reopens its pending/current/queued interaction.
 
 Focused subagent buffers ~
-  Subagent tool output in the parent chat keeps only each child run's main
-  information. While at least one subagent is running, pi-dev.nvim opens a
-  compact agent tree above the chat. Each row contains the agent name and its
-  current action. Press `Return` on `root-agent` to show the root chat, or on an
-  active child row to show that subagent chat. The tree is hidden when no
-  subagents are running and is capped at eight rows. Completed subagents do not
-  appear in the tree.
+  The root chat header keeps root identity, runtime, status, role, model,
+  thinking level, and session path. Each child block in its parent chat keeps
+  available identity, role/skills, task, status, model/thinking, progress, and
+  complete command summaries provided by Pi. While at least one descendant is
+  running, pi-dev.nvim opens a compact
+  agent tree above the chat. It recursively includes active children,
+  grandchildren, and deeper descendants. Each row contains agent identity, role
+  or skills when available, and ends with the latest/current command. Press
+  `Return` on `root-agent` to show the root chat, or on an active descendant row
+  to show that agent chat. The tree is hidden when only the root remains. Its
+  window height is capped at eight rows and scrolls for larger trees. Completed
+  subagents do not appear in the tree.
 
   To inspect any child result from the chat, put the cursor anywhere in that
   child subagent block and run `:PiDevSubagentOpen`, `/subagent-open`, or
   `<leader>a]`. The output surface switches to an isolated buffer titled like
-  `Pi chat subagent (deep N): ...`.
+  `Pi chat subagent (deep N): ...`. The focused buffer shows the full child
+  transcript and command history available in the Pi subagent result, plus the
+  same main information retained in its parent chat.
 
   Nested subagents can be opened from inside a focused subagent buffer with the
   same command; depth increases in the title. Return one level with

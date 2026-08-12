@@ -210,6 +210,10 @@ local function sync_runtime_status(runtime)
   if runtime then
     state.sync_active_rpc_runtime(runtime)
   end
+  local ok, renderer = pcall(require, 'pi-dev.renderer')
+  if ok and renderer.refresh_root_agent_info then
+    renderer.refresh_root_agent_info()
+  end
 end
 
 function M.set_status(status)

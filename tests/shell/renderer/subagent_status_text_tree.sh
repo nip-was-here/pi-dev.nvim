@@ -94,7 +94,10 @@ assert(vim.wait(1000, function()
 end), 'Return on parsed subagent tree row should open that subagent chat')
 local child = buf_text(state.ui.subagent_view.buf)
 assert(child:find('# Pi chat subagent %(deep 1%): reviewer'), child)
+assert(child:find('**Agent:** reviewer', 1, true), child)
 assert(child:find('**Status:** running', 1, true), child)
+assert(child:find('**Model:** example-model', 1, true), child)
+assert(child:find('**Thinking:** medium', 1, true), child)
 assert(child:find('Intercom target: subagent-reviewer-example-run-2', 1, true), child)
 LUA
 
