@@ -1352,13 +1352,7 @@ local function latest_subagent_permission_context_headers(permission_id)
   return subagent.permission_context_headers(block, permission_id, state.ui.subagent_view)
 end
 
-local function render_permission_block(block)
-  local context_headers = block.subagent_context_headers or (block.subagent_context_header and { block.subagent_context_header }) or nil
-  local header_level = '####'
-  if context_headers and #context_headers > 0 then
-    local parent_level = tostring(context_headers[#context_headers]):match('^(#+)') or '#####'
-    header_level = string.rep('#', math.min(#parent_level + 1, 12))
-  end
+local function permission_block_title(block)
   local title = tostring(block.title or 'Permission request')
   if block.summary and block.summary ~= '' then
     title = title .. ': ' .. block.summary
@@ -1366,20 +1360,95 @@ local function render_permission_block(block)
   if block.result and block.result ~= '' then
     title = title .. ' - ' .. compact_header_text(block.result)
   end
+  return title
+end
+
+local function permission_header_line(level, title, block)
   local duration_suffix = permission_duration_suffix(block)
-  local header = duration_suffix and right_aligned_heading(#header_level, title, duration_suffix, { suffix_shift = -1 })
-    or (header_level .. ' ' .. title)
+  if duration_suffix then
+    local line = right_aligned_heading(level, title, duration_suffix, { suffix_shift = -1 })
+    return line
+  end
+  return string.rep('#', level) .. ' ' .. title
+end
+
+local function render_permission_block(block)
+  local context_headers = block.subagent_context_headers or (block.subagent_context_header and { block.subagent_context_header }) or nil
+  local header_level = 4
+  if context_headers and #context_headers > 0 then
+    local parent_level = tostring(context_headers[#context_headers]):match('^(#+)') or '#####'
+    header_level = math.min(#parent_level + 1, 12)
+  end
   local lines = { '' }
   for _, context_header in ipairs(context_headers or {}) do
     table.insert(lines, context_header)
     table.insert(lines, '')
   end
-  table.insert(lines, header)
+  table.insert(lines, permission_header_line(header_level, permission_block_title(block), block))
   if block.details and #block.details > 0 then
     table.insert(lines, '')
     vim.list_extend(lines, block.details)
   end
   return lines
+end
+
+local function subagent_view_context_chain(view)
+  local chain = {}
+  local current = view
+  while current do
+    table.insert(chain, 1, current)
+    current = current.parent_view
+  end
+  return chain
+end
+
+local function render_subagent_view_permission_block(block, target_view)
+  local leaf_view = block and block.subagent_view_context or nil
+  local chain = subagent_view_context_chain(leaf_view)
+  local target_index = #chain
+  for index, view in ipairs(chain) do
+    if view == target_view then
+      target_index = index
+      break
+    end
+  end
+
+  local lines = { '' }
+  local level = 2
+  for index = target_index + 1, #chain do
+    table.insert(lines, string.rep('#', level) .. ' ' .. tostring(chain[index].title or chain[index].label or 'subagent'))
+    table.insert(lines, '')
+    level = math.min(level + 1, 12)
+  end
+  table.insert(lines, permission_header_line(level, permission_block_title(block), block))
+  if block.details and #block.details > 0 then
+    table.insert(lines, '')
+    vim.list_extend(lines, block.details)
+  end
+  return lines
+end
+
+local function mirror_permission_to_subagent_view(id, block)
+  local view = block and block.subagent_view_context or nil
+  local changed = false
+  while view do
+    local bufnr = view.buf
+    if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+      view.permission_order = view.permission_order or {}
+      view.permission_blocks = view.permission_blocks or {}
+      if not view.permission_blocks[id] then
+        table.insert(view.permission_order, id)
+      end
+      view.permission_blocks[id] = render_subagent_view_permission_block(block, view)
+      local ok, ui = pcall(require, 'pi-dev.ui')
+      if ok and ui.refresh_subagent_view_permissions then
+        ui.refresh_subagent_view_permissions(view)
+      end
+      changed = true
+    end
+    view = view.parent_view
+  end
+  return changed
 end
 
 local function fold_permission_block(block)
@@ -1960,6 +2029,7 @@ local function upsert_permission_block(id, spec, opts)
   block.local_finished_at_ms = spec.finished and (tonumber(opts.local_finished_at_ms) or local_milliseconds()) or nil
   block.subagent_context_headers = block.subagent_context_headers or latest_subagent_permission_context_headers(id)
   block.subagent_context_header = block.subagent_context_headers and block.subagent_context_headers[1] or block.subagent_context_header
+  block.subagent_view_context = block.subagent_view_context or state.ui.subagent_view
   if type(spec.details) == 'table' then
     block.details = spec.details
   else
@@ -1968,6 +2038,7 @@ local function upsert_permission_block(id, spec, opts)
   block.result = spec.result
   state.render.permission_blocks[id] = block
   replace_permission_block(id, render_permission_block(block), spec.fold == true)
+  mirror_permission_to_subagent_view(id, block)
   return id
 end
 
@@ -2011,6 +2082,7 @@ function M.finish_permission_request(id, result, opts)
   block.finished_at_ms = permission_timestamp_milliseconds(opts, { 'finishedAt', 'finished_at', 'endedAt', 'ended_at', 'endTime', 'end_time' }) or block.finished_at_ms
   block.local_finished_at_ms = tonumber(opts.local_finished_at_ms) or local_milliseconds()
   replace_permission_block(id, render_permission_block(block), true)
+  mirror_permission_to_subagent_view(id, block)
   return true
 end
 

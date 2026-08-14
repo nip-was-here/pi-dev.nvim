@@ -883,6 +883,17 @@ local function set_buffer_lines(bufnr, lines, filetype)
   return true
 end
 
+local function subagent_view_lines_with_permissions(view, base_lines)
+  local lines = vim.deepcopy(base_lines or (view and view.base_lines) or {})
+  for _, id in ipairs(view and view.permission_order or {}) do
+    local permission_lines = view.permission_blocks and view.permission_blocks[id]
+    if permission_lines then
+      vim.list_extend(lines, permission_lines)
+    end
+  end
+  return lines
+end
+
 local function open_subagent_child(child)
   if not child then
     return false
@@ -900,7 +911,8 @@ local function open_subagent_child(child)
   }
   view.output_title = subagent.title_text(view.title, depth)
   local bufnr_new = subagent.ensure_view_buffer(view, state.ui, buffers.setup_buffer, config.options.ui.output_filetype)
-  set_buffer_lines(bufnr_new, subagent.replace_title(child.lines or {}, view.title, depth), config.options.ui.output_filetype)
+  view.base_lines = subagent.replace_title(child.lines or {}, view.title, depth)
+  set_buffer_lines(bufnr_new, subagent_view_lines_with_permissions(view), config.options.ui.output_filetype)
   state.ui.subagent_view = view
   state.ui.output_title = view.output_title
   M.show()
@@ -1248,7 +1260,8 @@ local function refresh_subagent_view(view, tool_call_id, children)
     view.child_key = child.key or view.child_key
     view.output_title = subagent.title_text(view.title, view.depth)
     local bufnr = subagent.ensure_view_buffer(view, state.ui, buffers.setup_buffer, config.options.ui.output_filetype)
-    set_buffer_lines(bufnr, subagent.replace_title(child.lines or {}, view.title, view.depth), config.options.ui.output_filetype)
+    view.base_lines = subagent.replace_title(child.lines or {}, view.title, view.depth)
+    set_buffer_lines(bufnr, subagent_view_lines_with_permissions(view), config.options.ui.output_filetype)
     return true
   end
   return false
@@ -1268,6 +1281,19 @@ function M.refresh_subagent_view_from_parent(tool_call_id, children)
     M.refresh_chrome()
   end
   return changed
+end
+
+function M.refresh_subagent_view_permissions(view)
+  view = view or state.ui.subagent_view
+  if not (view and view.buf and vim.api.nvim_buf_is_valid(view.buf)) then
+    return false
+  end
+  set_buffer_lines(view.buf, subagent_view_lines_with_permissions(view), config.options.ui.output_filetype)
+  if state.ui.subagent_view == view then
+    state.ui.output_title = view.output_title or state.ui.output_title
+    M.refresh_chrome()
+  end
+  return true
 end
 
 function M.open_subagent_at_cursor()
