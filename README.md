@@ -167,8 +167,11 @@ parent chat, but each child block keeps its available identity, role/skills,
 task, status, model/thinking, progress, and live completed/current command
 summaries supplied by Pi. Tool durations update while the current command runs
 and remain beside completed commands when their start was observed. For scripted
-workflows, declared `runs.run`/`runs.all` children appear
-immediately from the tool request, before their first progress update. The focused child chat shows the full
+workflows, declared `runs.run`/`runs.all` children appear immediately from the
+tool request, before their first progress update. For local async runs,
+pi-dev.nvim watches the returned lifecycle `status.json` and replaces those
+provisional commands with real step/tool status until the run becomes terminal.
+The focused child chat shows the full
 available child transcript and command history. While descendants are running, a
 compact agent tree appears above the chat and lists `root-agent` plus every active
 child, grandchild, and deeper descendant recursively. Each row ends with the

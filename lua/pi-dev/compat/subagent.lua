@@ -1056,6 +1056,124 @@ local function transcript_lines_from_messages(messages, progress)
   return #lines > 0 and lines or nil
 end
 
+local function async_status_name(step, index)
+  return first_string_field(step, { 'label', 'workflowKey', 'name', 'id' })
+    or first_string_field(step, { 'agent', 'role' })
+    or ('child-' .. tostring(index))
+end
+
+local function async_status_item(step, index, status)
+  step = type(step) == 'table' and step or {}
+  local role = first_string_field(step, { 'agent', 'role' })
+  local name = async_status_name(step, index)
+  local started_at = tonumber(step.startedAt or status.startedAt)
+  local updated_at = tonumber(step.lastUpdate or status.lastUpdate or status.updatedAt)
+  local tokens = step.tokens
+  if type(tokens) == 'table' then
+    tokens = tonumber(tokens.total or tokens.totalTokens)
+  end
+  local progress = {
+    index = index - 1,
+    agent = name,
+    status = tostring(step.status or step.state or status.state or 'running'),
+    task = first_string_field(step, { 'description', 'task', 'goal' }) or first_string_field(status, { 'description', 'task', 'goal' }),
+    skills = string_list(step.skills),
+    model = step.model,
+    thinking = step.thinking,
+    currentTool = step.currentTool,
+    currentToolArgs = step.currentToolArgs,
+    currentToolStartedAt = step.currentToolStartedAt,
+    currentPath = step.currentPath,
+    recentTools = type(step.recentTools) == 'table' and step.recentTools or {},
+    recentOutput = type(step.recentOutput) == 'table' and step.recentOutput or {},
+    toolCount = step.toolCount,
+    turnCount = step.turnCount,
+    tokens = tokens,
+    durationMs = tonumber(step.durationMs) or (started_at and updated_at and math.max(0, updated_at - started_at) or nil),
+  }
+  return {
+    index = index - 1,
+    name = name,
+    agent = name,
+    role = role ~= name and role or nil,
+    skills = string_list(step.skills),
+    model = step.model,
+    thinking = step.thinking,
+    task = progress.task,
+    status = progress.status,
+    state = progress.status,
+    progress = progress,
+    children = type(step.children) == 'table' and step.children or nil,
+    steps = type(step.steps) == 'table' and step.steps or nil,
+    currentTool = step.currentTool,
+    currentToolArgs = step.currentToolArgs,
+    currentToolStartedAt = step.currentToolStartedAt,
+    currentPath = step.currentPath,
+    recentTools = type(step.recentTools) == 'table' and step.recentTools or {},
+  }
+end
+
+function M.async_receipt(result)
+  if type(result) ~= 'table' then
+    return nil
+  end
+  local details = type(result.details) == 'table' and result.details or result
+  local async_dir = first_string_field(details, { 'asyncDir', 'async_dir' })
+  local async_id = first_string_field(details, { 'asyncId', 'async_id', 'runId', 'run_id' })
+  if not async_dir or not async_id then
+    return nil
+  end
+  return { id = async_id, dir = async_dir, mode = details.mode }
+end
+
+function M.async_status_result(status, receipt)
+  if type(status) ~= 'table' then
+    return nil
+  end
+  local steps = type(status.steps) == 'table' and status.steps or {}
+  local results = {}
+  for index, step in ipairs(steps) do
+    table.insert(results, async_status_item(step, index, status))
+  end
+  if #results == 0 then
+    local root = vim.deepcopy(status)
+    if not root.agent and type(root.agents) == 'table' and #root.agents == 1 then
+      root.agent = root.agents[1]
+    end
+    if not first_string_field(root, { 'agent', 'role', 'label', 'workflowKey', 'name', 'id' }) and not root.currentTool then
+      return nil
+    end
+    table.insert(results, async_status_item(root, 1, status))
+  end
+  return {
+    content = { { type = 'text', text = 'Async subagent status updated.' } },
+    details = {
+      mode = status.mode or (receipt and receipt.mode) or 'single',
+      runId = status.runId or (receipt and receipt.id),
+      asyncId = receipt and receipt.id or status.runId,
+      asyncDir = receipt and receipt.dir or nil,
+      results = results,
+      progress = vim.tbl_map(function(item) return item.progress end, results),
+    },
+  }
+end
+
+function M.async_status_terminal(status)
+  local value = type(status) == 'table' and tostring(status.state or status.status or ''):lower() or ''
+  return value == 'complete'
+    or value == 'completed'
+    or value == 'cancelled'
+    or value == 'canceled'
+    or value == 'error'
+    or value == 'failed'
+    or value == 'paused'
+    or value == 'stopped'
+    or value == 'detached'
+    or value == 'rejected'
+    or value == 'timed out'
+    or value == 'timeout'
+end
+
 function M.is_tool(tool_name)
   local lower = tostring(tool_name or ''):lower()
   return lower == 'agent'
@@ -1378,7 +1496,7 @@ nested_child_from_summary = function(item, stable_key)
     tokens = type(item.totalTokens) == 'number' and item.totalTokens or nil,
     model = item.model,
     thinking = item.thinking,
-    recentTools = {},
+    recentTools = type(item.recentTools) == 'table' and item.recentTools or {},
   }
   local main_info = { '## Main info' }
   append_agent_info(main_info, item, progress, status, agent, { name = name })
