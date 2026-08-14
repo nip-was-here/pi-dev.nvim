@@ -9,6 +9,7 @@ local markdown = require('pi-dev.markdown')
 local message_content = require('pi-dev.message_content')
 local pipeline = require('pi-dev.render_pipeline')
 local subagent = require('pi-dev.compat.subagent')
+local subagent_async = require('pi-dev.compat.subagent_async')
 local state = require('pi-dev.state')
 
 local M = {}
@@ -21,6 +22,8 @@ local TOOL_FLUSH_DELAY_MS = 33
 local flush_live_render
 local cancel_live_render_timer
 local flush_pending_tool_renders
+local clear_pending_tool_flush
+local attach_async_subagent_watch
 
 local function refresh_chrome()
   local ok, ui = pcall(require, 'pi-dev.ui')
@@ -781,6 +784,8 @@ local function restored_tool_result_payload(message)
     output = message.output,
     text = message.text,
     result = message.result,
+    details = message.details,
+    isError = message.isError,
   }
 end
 
@@ -1534,6 +1539,7 @@ local function reset_render_state()
 end
 
 local function close_subagent_views_for_parent_render()
+  subagent_async.stop_all()
   local ok, ui = pcall(require, 'pi-dev.ui')
   if ok and ui.close_all_subagent_views then
     ui.close_all_subagent_views({ restore_buffer = false, restore_title = false })
@@ -1570,11 +1576,17 @@ local function apply_restored_tool_blocks(tool_blocks)
         child_folds_enabled = spec.child_folds == true,
       }
       state.render.tool_blocks[spec.id] = block
+      if spec.object then
+        state.render.tool_objects[spec.id] = spec.object
+      end
       apply_tool_fold(block, nil)
       if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
         subagent.resolve_children(block, spec.subagent_children, vim.api.nvim_buf_get_lines(bufnr, block.start_line - 1, block.end_line, false))
       end
       apply_child_tool_folds(block, nil)
+      if spec.object and attach_async_subagent_watch then
+        attach_async_subagent_watch(spec.id, spec.object, state.rpc.active_key)
+      end
     end
   end
 end
@@ -1712,6 +1724,7 @@ message_to_lines = function(message)
         header_text = header_text,
         child_folds = is_subagent_tool(object.name),
         subagent_children = tool_lines.__pi_subagent_children,
+        object = object,
       })
     end
   end
@@ -2125,7 +2138,66 @@ local function schedule_subagent_live_timing_refresh(id, object)
   end, 1000)
 end
 
-local function clear_pending_tool_flush(id)
+local function async_watch_key(runtime_key, id)
+  return tostring(runtime_key or 'default') .. ':' .. tostring(id)
+end
+
+attach_async_subagent_watch = function(id, object, runtime_key)
+  if not (object and is_subagent_tool(object.name) and subagent.async_receipt) then
+    return false
+  end
+  local receipt = subagent.async_receipt(object.async_subagent_start_result or object.result)
+  if not receipt then
+    return false
+  end
+  object.async_subagent_receipt = receipt
+  object.async_subagent_runtime_key = runtime_key
+  local runtime_owner = state.ensure_rpc_runtime(runtime_key)
+  local key = async_watch_key(runtime_key, id)
+  return subagent_async.watch({
+    key = key,
+    async_dir = receipt.dir,
+    is_current = function()
+      return state.rpc.active_key == runtime_key
+        and state.rpc.runtimes[runtime_key] == runtime_owner
+        and state.render.tool_objects
+        and state.render.tool_objects[id] == object
+    end,
+    on_status = function(status)
+      if state.rpc.active_key ~= runtime_key or state.rpc.runtimes[runtime_key] ~= runtime_owner
+        or not state.render.tool_objects or state.render.tool_objects[id] ~= object
+      then
+        return
+      end
+      local result = subagent.async_status_result(status, receipt)
+      if not result then
+        return
+      end
+      local now_ms = tonumber(status.lastUpdate or status.updatedAt) or wall_clock_milliseconds()
+      result = subagent.enrich_live_tool_timings(object, result, now_ms)
+      local async_started_at = tonumber(status.startedAt)
+      local async_updated_at = tonumber(status.endedAt or status.lastUpdate or status.updatedAt)
+      if subagent.async_status_terminal(status) then
+        object.status = 'Finished'
+        object.result = result
+        object.partial_result = nil
+        if async_started_at and async_updated_at then
+          object.duration_ms = math.max(0, async_updated_at - async_started_at)
+        end
+      else
+        object.status = 'Running'
+        object.partial_result = result
+        object.result = nil
+        object.duration_ms = nil
+      end
+      clear_pending_tool_flush(id)
+      render_tool_object_by_id(id)
+      schedule_subagent_live_timing_refresh(id, object)
+    end,
+  })
+end
+
+clear_pending_tool_flush = function(id)
   local pending = state.render.pending_tool_flushes and state.render.pending_tool_flushes[id]
   if pending then
     pending.scheduled = false
@@ -2285,6 +2357,15 @@ local function update_tool_object(event, status)
     end
     object.result = result
     object.partial_result = nil
+    local receipt = is_subagent_tool(object.name) and subagent.async_receipt(result) or nil
+    if receipt then
+      object.async_subagent_start_result = result
+      object.status = 'Running'
+      object.result = nil
+      object.finished_at_ms = nil
+      object.finished_at_ms_reliable = nil
+      object.duration_ms = nil
+    end
   end
   if status == 'Finished' and event.result ~= nil then
     maybe_append_permission_denial_block(id, object, event)
@@ -2325,6 +2406,9 @@ local function update_tool_object(event, status)
   end
   clear_pending_tool_flush(id)
   render_tool_object_by_id(id)
+  if status == 'Finished' and event.result ~= nil then
+    attach_async_subagent_watch(id, object, event.__pi_runtime_key or state.rpc.active_key)
+  end
 end
 
 local open_block_fold = folds.open_block

@@ -441,7 +441,11 @@ Focused subagent buffers ~
   live completed/current command summaries provided by Pi. Tool durations update
   while the current command runs and remain beside completed commands when their
   start was observed. Scripted `runs.run`/`runs.all`
-  children appear from the tool request before their first progress update.
+  children appear from the tool request before their first progress update. For
+  local async runs, pi-dev.nvim watches the returned lifecycle `status.json` and
+  replaces provisional workflow commands with real step/tool status until the
+  run becomes terminal. If the artifact is unavailable or malformed, the
+  provisional information remains and normal Pi RPC operation continues.
   While at least one descendant is running, pi-dev.nvim opens a compact
   agent tree above the chat. It recursively includes active children,
   grandchildren, and deeper descendants. Each row contains agent identity, role
