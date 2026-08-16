@@ -58,8 +58,7 @@ assert(ui.get_input_text() == '', 'permission tree selection must not fill Pi in
 assert(vim.wait(1000, function()
   local rendered = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(state.ui.output_win), 0, -1, false), '\n')
   return rendered:find('#### Permission request: bash `git st', 1, true) ~= nil
-    and rendered:find('Pi requested bash command.\nAllow this command?', 1, true) ~= nil
-    and rendered:find('```bash\ngit status\n```', 1, true) == nil
+    and rendered:find('Pi requested bash command.\n\n```bash\ngit status\n```\n\nAllow this command?', 1, true) ~= nil
 end), table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(state.ui.output_win), 0, -1, false), '\n'))
 local output = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(state.ui.output_win), 0, -1, false), '\n')
 assert(output:find('answer after old permission', 1, true), output)

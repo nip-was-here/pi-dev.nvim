@@ -47,8 +47,9 @@ assert(not permission_header:find(command, 1, true), permission_header)
 local header_pos = text:find('#### Permission request:', 1, true)
 assert(header_pos, text)
 local after_header = text:sub(header_pos or 1)
-assert(after_header:find('```bash\n' .. command .. '\n```', 1, true) == nil, text)
-assert(after_header:find('Pi requested bash command.\nAllow this command?', 1, true), text)
+assert(after_header:find('```bash\n' .. command .. '\n```', 1, true), text)
+assert(permission_header:find(command, 1, true) == nil, permission_header)
+assert(after_header:find('Pi requested bash command.\n\n```bash\n' .. command .. '\n```\n\nAllow this command?', 1, true), text)
 assert(text:find("requested bash command '" .. command .. "'", 1, true) == nil, text)
 LUA
 

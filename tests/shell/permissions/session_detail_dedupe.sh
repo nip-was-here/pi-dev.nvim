@@ -32,11 +32,12 @@ assert(vim.wait(1000, function()
   return table.concat(vim.api.nvim_buf_get_lines(state.ui.output_buf, 0, -1, false), '\n'):find('#### Permission request', 1, true) ~= nil
 end), 'bash permission did not render')
 local text = table.concat(vim.api.nvim_buf_get_lines(state.ui.output_buf, 0, -1, false), '\n')
-assert(text:find('```bash\n' .. bash_command .. '\n```', 1, true) == nil, text)
+assert(text:find('```bash\n' .. bash_command .. '\n```', 1, true), text)
+assert(text:find('#### Permission request: bash `' .. bash_command, 1, true) == nil, text)
 assert(text:find('```bash\n./tests/*\n```', 1, true) == nil, text)
 local _, bash_count = text:gsub(vim.pesc(bash_command), '')
-assert(bash_count == 0, text)
-assert(text:find('Pi requested bash command.\nAllow this command?', 1, true), text)
+assert(bash_count == 1, text)
+assert(text:find('Pi requested bash command.\n\n```bash\n' .. bash_command .. '\n```\n\nAllow this command?', 1, true), text)
 
 vim.fn.writefile({
   vim.json.encode({ type = 'session', cwd = vim.uv.cwd() }),

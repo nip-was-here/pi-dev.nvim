@@ -40,7 +40,7 @@ renderer.handle_event({
   toolName = 'subagent',
   partialResult = {
     progress = {
-      { index = 0, agent = 'reviewer', status = 'running', turnCount = 1 },
+      { index = 0, agent = 'reviewer', status = 'running', turnCount = 1, currentTool = 'read', currentPath = 'lua/pi-dev/old.lua' },
       { index = 1, agent = 'scout', status = 'running', turnCount = 1 },
     },
     results = {
@@ -66,6 +66,10 @@ extension_ui.handle_request({
 })
 assert(vim.wait(1000, function() return state.ui.interaction ~= nil end), 'permission interaction should render')
 
+local tree = table.concat(vim.api.nvim_buf_get_lines(state.ui.subagent_tree_buf, 0, -1, false), '\n')
+assert(tree:find('reviewer - bash git status', 1, true), tree)
+assert(tree:find('reviewer - read lua/pi-dev/old.lua', 1, true) == nil, tree)
+
 local text = table.concat(vim.api.nvim_buf_get_lines(state.ui.output_buf, 0, -1, false), '\n')
 local reviewer_pos = text:find('##### Agent 1/2: reviewer %- running')
 local scout_pos = text:find('##### Agent 2/2: scout %- running')
@@ -74,6 +78,8 @@ local second_permission_pos = text:find('###### Permission request: bash `pwd`',
 assert(reviewer_pos and scout_pos and first_permission_pos and second_permission_pos, text)
 assert(text:find('##### Agent 1/2: reviewer - running\n\n###### Permission request: bash `git *`', 1, true), text)
 assert(text:find('##### Agent 2/2: scout - running\n\n###### Permission request: bash `pwd`', 1, true), text)
+assert(text:find('Permission request: bash `git status`', 1, true) == nil, text)
+assert(text:find('```bash\ngit status\n```', 1, true), text)
 assert(text:find('\n#### Permission request: bash `git *`', 1, true) == nil, text)
 assert(text:find('\n#### Permission request: bash `pwd`', 1, true) == nil, text)
 assert(text:find('perm%-subagent%-1') == nil, 'internal request ids should not leak into chat')
@@ -170,6 +176,8 @@ extension_ui.handle_request({
 assert(vim.wait(1000, function() return state.ui.interaction ~= nil end), 'visible subagent permission interaction should render')
 local visible = table.concat(vim.api.nvim_buf_get_lines(state.ui.subagent_view.buf, 0, -1, false), '\n')
 assert(visible:find('## Permission request: bash `git *`', 1, true), visible)
+assert(visible:find('Permission request: bash `git status`', 1, true) == nil, visible)
+assert(visible:find('```bash\ngit status\n```', 1, true), visible)
 assert(visible:find('Pi requested bash command', 1, true), visible)
 renderer.handle_event({
   type = 'tool_execution_update',

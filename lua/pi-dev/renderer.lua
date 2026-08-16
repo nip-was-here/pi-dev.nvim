@@ -1343,14 +1343,15 @@ local function cancel_permission_timer(id)
   end
 end
 
-local function latest_subagent_permission_context_headers(permission_id)
+local function latest_subagent_permission_context_headers(permission_id, action)
   local id = state.render.last_tool_id
   local object = id and state.render.tool_objects and state.render.tool_objects[id]
   local block = id and state.render.tool_blocks and state.render.tool_blocks[id]
   if not (object and is_subagent_tool(object.name)) then
     block = nil
   end
-  return subagent.permission_context_headers(block, permission_id, state.ui.subagent_view)
+  local headers, child = subagent.permission_context_headers(block, permission_id, state.ui.subagent_view, action)
+  return headers, child, block
 end
 
 local function permission_block_title(block)
@@ -2011,7 +2012,14 @@ local function upsert_permission_block(id, spec, opts)
   block.local_started_at_ms = block.local_started_at_ms or tonumber(opts.local_started_at_ms) or local_milliseconds()
   block.finished_at_ms = spec.finished and (permission_timestamp_milliseconds(opts, { 'finishedAt', 'finished_at', 'endedAt', 'ended_at', 'endTime', 'end_time' }) or block.finished_at_ms) or nil
   block.local_finished_at_ms = spec.finished and (tonumber(opts.local_finished_at_ms) or local_milliseconds()) or nil
-  block.subagent_context_headers = block.subagent_context_headers or latest_subagent_permission_context_headers(id)
+  if not block.subagent_context_headers then
+    local headers, child, parent_block = latest_subagent_permission_context_headers(id, opts.action)
+    block.subagent_context_headers = headers
+    block.subagent_context_child = child
+    block.subagent_parent_tool_block = parent_block
+  elseif opts.action and block.subagent_parent_tool_block and block.subagent_context_child and subagent.permission_context_headers then
+    subagent.permission_context_headers(block.subagent_parent_tool_block, id, state.ui.subagent_view, opts.action)
+  end
   block.subagent_context_header = block.subagent_context_headers and block.subagent_context_headers[1] or block.subagent_context_header
   block.subagent_view_context = block.subagent_view_context or state.ui.subagent_view
   if type(spec.details) == 'table' then
@@ -2023,6 +2031,12 @@ local function upsert_permission_block(id, spec, opts)
   state.render.permission_blocks[id] = block
   replace_permission_block(id, render_permission_block(block), spec.fold == true)
   mirror_permission_to_subagent_view(id, block)
+  if opts.action then
+    local ok, ui = pcall(require, 'pi-dev.ui')
+    if ok and ui.refresh_subagent_tree then
+      ui.refresh_subagent_tree()
+    end
+  end
   return id
 end
 
@@ -2062,8 +2076,15 @@ function M.finish_permission_request(id, result, opts)
   block.result = tostring(result or '')
   block.finished_at_ms = permission_timestamp_milliseconds(opts, { 'finishedAt', 'finished_at', 'endedAt', 'ended_at', 'endTime', 'end_time' }) or block.finished_at_ms
   block.local_finished_at_ms = tonumber(opts.local_finished_at_ms) or local_milliseconds()
+  if block.subagent_parent_tool_block and subagent.clear_permission_action then
+    subagent.clear_permission_action(block.subagent_parent_tool_block, id)
+  end
   replace_permission_block(id, render_permission_block(block), true)
   mirror_permission_to_subagent_view(id, block)
+  local ok, ui = pcall(require, 'pi-dev.ui')
+  if ok and ui.refresh_subagent_tree then
+    ui.refresh_subagent_tree()
+  end
   return true
 end
 
