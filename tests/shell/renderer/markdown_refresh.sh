@@ -122,3 +122,46 @@ assert(snapshots[#snapshots].foldclosed and snapshots[#snapshots].foldclosed ~= 
 LUA
 
 pidev_run_lua_file "$refresh_order_lua"
+
+hidden_refresh_lua="$(pidev_lua_file)"
+cat > "$hidden_refresh_lua" <<'LUA'
+_G.pi_md_calls = {}
+package.preload['render-markdown'] = function()
+  return {
+    set_buf = function(enabled)
+      table.insert(_G.pi_md_calls, { kind = 'set_buf', enabled = enabled, buf = vim.api.nvim_get_current_buf() })
+    end,
+    render = function(opts)
+      table.insert(_G.pi_md_calls, { kind = 'render', buf = opts.buf, win = opts.win, event = opts.event })
+    end,
+  }
+end
+
+require('pi-dev').setup({
+  keymaps = { enable = false },
+  ui = { width = 80, input_height = 8 },
+})
+
+local renderer = require('pi-dev.renderer')
+local state = require('pi-dev.state')
+local ui = require('pi-dev.ui')
+ui.show()
+assert(vim.wait(1000, function() return #_G.pi_md_calls > 0 end), 'initial visible markdown refresh did not run')
+_G.pi_md_calls = {}
+
+ui.hide()
+renderer.append_system('hidden output should not refresh markdown')
+assert(not vim.wait(200, function() return #_G.pi_md_calls > 0 end), vim.inspect(_G.pi_md_calls))
+
+ui.show()
+assert(vim.wait(1000, function()
+  for _, call in ipairs(_G.pi_md_calls) do
+    if call.kind == 'render' and call.buf == state.ui.output_buf and call.win == state.ui.output_win then
+      return true
+    end
+  end
+  return false
+end), vim.inspect(_G.pi_md_calls))
+LUA
+
+pidev_run_lua_file "$hidden_refresh_lua"

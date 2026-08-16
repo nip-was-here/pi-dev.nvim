@@ -52,7 +52,9 @@ renderer.append_permission_request('permission-wait', 'bash `chmod target`', {
 
 local pending_text = output_text()
 local pending_header = pending_text:match('(#### Permission request: bash `chmod target`[^\n]*)')
-assert_right_suffix(pending_header, pending_text)
+assert(pending_header, pending_text)
+assert(not pending_header:match('%([^()]+%)$'), pending_header)
+assert(next(state.render.permission_timers or {}) == nil, 'pending permission should not schedule live header timers')
 
 renderer.clear('permission wait truncation')
 local long_summary = 'bash `' .. string.rep('very-long-command-segment-', 8) .. '`'
@@ -62,8 +64,8 @@ renderer.append_permission_request('permission-long', long_summary, {
 }, { timestamp = timestamp(2000), local_started_at_ms = local_ms(-5000) })
 local long_text = output_text()
 local long_header = long_text:match('(#### Permission request:[^\n]*)')
-assert_suffix(long_header, long_text)
-assert(long_header:find('%.%.%.'), long_header)
+assert(long_header, long_text)
+assert(not long_header:match('%([^()]+%)$'), long_header)
 
 renderer.clear('permission wait duration')
 renderer.handle_event({

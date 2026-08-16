@@ -525,9 +525,10 @@ Compatibility layers ~
 Permission prompts ~
   The permission compatibility layer is enabled by default. It detects
   permission selects, renders concise choices in the interaction surface,
-  mirrors request context and elapsed wait time into the output surface as a
-  folded permission object, and returns exact original option values to Pi. Tool
-  duration labels exclude time spent waiting for the permission answer.
+  mirrors request context into the output surface as a folded permission object,
+  adds elapsed wait time after the permission is answered, and returns exact
+  original option values to Pi. Tool duration labels exclude time spent waiting
+  for the permission answer.
 
   Permission prompts from inactive branch runtimes are retained on those
   runtimes and shown when the user returns to the branch. Permission prompts

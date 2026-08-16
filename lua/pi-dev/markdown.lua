@@ -25,6 +25,21 @@ local function is_markdown(bufnr)
   return filetype == 'markdown' or filetype:match('%.markdown$') ~= nil or filetype:match('markdown') ~= nil
 end
 
+local function visible_window_for_buffer(bufnr, win)
+  if not valid_buf(bufnr) then
+    return nil
+  end
+  if valid_win(win) and vim.api.nvim_win_get_buf(win) == bufnr then
+    return win
+  end
+  for _, candidate in ipairs(vim.api.nvim_list_wins()) do
+    if valid_win(candidate) and vim.api.nvim_win_get_buf(candidate) == bufnr then
+      return candidate
+    end
+  end
+  return nil
+end
+
 local function in_window(win, callback)
   if valid_win(win) then
     return pcall(vim.api.nvim_win_call, win, callback)
@@ -76,6 +91,10 @@ function M.refresh(bufnr, win, opts)
   if not is_markdown(bufnr) then
     return
   end
+  win = visible_window_for_buffer(bufnr, win)
+  if not win then
+    return
+  end
 
   local key = tostring(bufnr) .. ':' .. tostring(win or 0)
   local settle_ms = tonumber(opts.settle_ms) or 0
@@ -83,7 +102,10 @@ function M.refresh(bufnr, win, opts)
     settle_pending[key] = true
     vim.defer_fn(function()
       settle_pending[key] = nil
-      run_refresh(bufnr, win)
+      local visible_win = visible_window_for_buffer(bufnr, win)
+      if visible_win then
+        run_refresh(bufnr, visible_win)
+      end
     end, settle_ms)
   end
 
@@ -93,7 +115,10 @@ function M.refresh(bufnr, win, opts)
   pending[key] = true
   vim.defer_fn(function()
     pending[key] = nil
-    run_refresh(bufnr, win)
+    local visible_win = visible_window_for_buffer(bufnr, win)
+    if visible_win then
+      run_refresh(bufnr, visible_win)
+    end
   end, REFRESH_DELAY_MS)
 end
 
