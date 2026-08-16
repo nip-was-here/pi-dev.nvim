@@ -1821,6 +1821,8 @@ function M.child_from_buffer(bufnr, line)
   return M.child_from_buffer_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), line)
 end
 
+local apply_permission_actions
+
 local function merge_child_identity(previous, child)
   if not previous then
     return child
@@ -1899,6 +1901,7 @@ function M.resolve_children(block, children, buffer_lines)
       child.end_line = resolved[index + 1].start_line - 1
     end
   end
+  apply_permission_actions(resolved, block.subagent_permission_actions)
   block.subagent_children = resolved
 end
 
@@ -1936,42 +1939,174 @@ function M.context_headers_from_view(view)
   return #headers > 0 and headers or nil
 end
 
-function M.permission_context_headers(block, permission_id, active_view)
+local function child_identity_keys(child)
+  if type(child) ~= 'table' then
+    return {}
+  end
+  local keys = {}
+  for _, value in ipairs({ child.key, child.header, child.name, child.title, child.label }) do
+    if value ~= nil and value ~= vim.NIL and tostring(value) ~= '' then
+      table.insert(keys, tostring(value))
+    end
+  end
+  return keys
+end
+
+local function child_matches_view(child, view)
+  if type(child) ~= 'table' or not view then
+    return false
+  end
+  if view.child_key and child.key and tostring(view.child_key) == tostring(child.key) then
+    return true
+  end
+  if view.child_header and child.header and tostring(view.child_header) == tostring(child.header) then
+    return true
+  end
+  local title = tostring(view.title or '')
+  return title ~= '' and (title == tostring(child.title or '') or title == tostring(child.label or '') or title == tostring(child.name or ''))
+end
+
+local function find_child_for_view(children, view)
+  for _, child in ipairs(type(children) == 'table' and children or {}) do
+    if child_matches_view(child, view) then
+      return child
+    end
+    local nested = find_child_for_view(child.children, view)
+    if nested then
+      return nested
+    end
+  end
+  return nil
+end
+
+local function child_is_active(child)
+  if child and child.active ~= nil then
+    return child.active == true
+  end
+  local status = vim.trim(tostring(child and child.status or '')):lower()
+  return status == '' or not nested_terminal_statuses[status]
+end
+
+local function collect_permission_candidates(children, path, candidates)
+  candidates = candidates or {}
+  for _, child in ipairs(type(children) == 'table' and children or {}) do
+    local child_path = vim.deepcopy(path or {})
+    table.insert(child_path, child.header or ('##### ' .. tostring(child.title or child.label or child.name or 'subagent')))
+    if child_is_active(child) then
+      table.insert(candidates, { child = child, headers = child_path })
+    end
+    collect_permission_candidates(child.children, child_path, candidates)
+  end
+  return candidates
+end
+
+local function remember_permission_action(block, child, action, permission_id)
+  if not (block and child and action and action ~= '') then
+    return false
+  end
+  block.subagent_permission_actions = block.subagent_permission_actions or {}
+  local entry = { action = action, permission_id = permission_id and tostring(permission_id) or nil }
+  for _, key in ipairs(child_identity_keys(child)) do
+    block.subagent_permission_actions[key] = entry
+  end
+  if child.permission_action ~= action then
+    child.permission_previous_action = child.permission_previous_action or child.action
+  end
+  child.permission_request_id = permission_id and tostring(permission_id) or child.permission_request_id
+  child.permission_action = action
+  child.action = action
+  return true
+end
+
+apply_permission_actions = function(children, actions)
+  if type(actions) ~= 'table' then
+    return
+  end
+  for _, child in ipairs(type(children) == 'table' and children or {}) do
+    for _, key in ipairs(child_identity_keys(child)) do
+      local entry = actions[key]
+      if entry and entry.action and entry.action ~= '' then
+        child.permission_action = entry.action
+        child.action = entry.action
+        break
+      end
+    end
+    apply_permission_actions(child.children, actions)
+  end
+end
+
+local function clear_permission_action_from_children(children, permission_id)
+  local changed = false
+  local target = tostring(permission_id)
+  for _, child in ipairs(type(children) == 'table' and children or {}) do
+    if tostring(child.permission_request_id or '') == target then
+      child.action = child.permission_previous_action or child.status or child.action
+      child.permission_action = nil
+      child.permission_previous_action = nil
+      child.permission_request_id = nil
+      changed = true
+    end
+    changed = clear_permission_action_from_children(child.children, permission_id) or changed
+  end
+  return changed
+end
+
+function M.clear_permission_action(block, permission_id)
+  if not (block and permission_id ~= nil) then
+    return false
+  end
+  local removed = false
+  local target = tostring(permission_id)
+  for key, entry in pairs(block.subagent_permission_actions or {}) do
+    if entry and tostring(entry.permission_id or '') == target then
+      block.subagent_permission_actions[key] = nil
+      removed = true
+    end
+  end
+  return clear_permission_action_from_children(block.subagent_children, permission_id) or removed
+end
+
+function M.permission_context_headers(block, permission_id, active_view, action)
   if not block then
     return M.context_headers_from_view(active_view)
   end
   block.subagent_permission_contexts = block.subagent_permission_contexts or {}
   local key = permission_id ~= nil and tostring(permission_id) or nil
   if key and block.subagent_permission_contexts[key] then
-    return block.subagent_permission_contexts[key]
+    local child = find_child_for_view(block.subagent_children, active_view)
+    if action then
+      remember_permission_action(block, child, action, permission_id)
+    end
+    return block.subagent_permission_contexts[key], child
   end
 
   local headers = M.context_headers_from_view(active_view)
+  local child = find_child_for_view(block.subagent_children, active_view)
   if not headers then
-    local candidates = {}
-    for _, child in ipairs(block.subagent_children or {}) do
-      if tostring(child.header or ''):lower():find('running', 1, true) then
-        table.insert(candidates, child)
-      end
-    end
+    local candidates = collect_permission_candidates(block.subagent_children)
     if #candidates == 0 then
-      for _, child in ipairs(block.subagent_children or {}) do
-        table.insert(candidates, child)
+      for _, candidate_child in ipairs(block.subagent_children or {}) do
+        table.insert(candidates, { child = candidate_child, headers = { candidate_child.header or '##### subagent' } })
       end
     end
 
-    local child = nil
     if #candidates > 0 then
       local cursor = tonumber(block.subagent_permission_context_cursor) or 0
-      child = candidates[(cursor % #candidates) + 1]
+      local candidate = candidates[(cursor % #candidates) + 1]
       block.subagent_permission_context_cursor = cursor + 1
+      child = candidate.child
+      headers = candidate.headers
+    else
+      headers = { '##### subagent' }
     end
-    headers = { child and child.header or '##### subagent' }
+  end
+  if action then
+    remember_permission_action(block, child, action, permission_id)
   end
   if key then
     block.subagent_permission_contexts[key] = headers
   end
-  return headers
+  return headers, child
 end
 
 return M

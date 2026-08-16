@@ -451,6 +451,11 @@ local function should_skip_duplicate_detail_line(line, context)
 end
 
 function M.bash_command_text(text)
+  local normalized = normalize_line_endings(text)
+  local full_command = normalized:match("%([Ff]ull command:%s*'(.*)'%)%.?%s*Allow")
+  if full_command and vim.trim(full_command) ~= '' then
+    return vim.trim(full_command)
+  end
   for _, line in ipairs(vim.split(normalize_line_endings(strip_permission_metadata(text)), '\n', { plain = true })) do
     local value = line:match("requested bash command '(.*)'%s*%.?%s*Allow .*$")
       or line:match('requested bash command%s*:?%s*"(.*)"%s*%.?%s*Allow .*$')
@@ -543,8 +548,16 @@ local function bash_essence_detail_lines(message)
   local lines = {
     actor_for_message(message) .. ' requested bash command.',
   }
+  local direct_command = M.bash_command_text(message)
+  local context = permission_detail_context(message)
+  local command = tostring(message or ''):find('full command', 1, true) and direct_command or (context.bash or direct_command)
+  if command and command ~= '' then
+    table.insert(lines, '')
+    vim.list_extend(lines, fenced_detail_lines('bash', command))
+  end
   local question = allow_question(message) or 'Allow this command?'
   if question ~= '' then
+    table.insert(lines, '')
     table.insert(lines, question)
   end
   return lines
@@ -608,10 +621,19 @@ function M.detail_lines(request)
   return lines
 end
 
+local function permission_command(request)
+  local text = table.concat({ title_text(request), normalize_line_endings(request.message or '') }, '\n')
+  local direct_command = M.bash_command_text(text)
+  local context = permission_detail_context(text)
+  return text:find('full command', 1, true) and direct_command or (context.bash or direct_command)
+end
+
 local function append_permission_request(request, summary)
+  local command = permission_command(request)
   renderer.append_permission_request(request.id, summary, M.detail_lines(request), {
     timestamp = request.timestamp or request.createdAt or request.created_at or request.time or request.date,
     scroll_to_bottom_if_unfocused = true,
+    action = command and ('bash ' .. command) or nil,
   })
 end
 
