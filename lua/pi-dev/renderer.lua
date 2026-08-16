@@ -1323,6 +1323,9 @@ local function permission_duration_milliseconds(block)
 end
 
 local function permission_duration_suffix(block)
+  if not block or (block.result == nil and not block.finished_at_ms and not block.local_finished_at_ms) then
+    return nil
+  end
   local duration = permission_duration_milliseconds(block)
   if not duration or duration < 1000 then
     return nil
@@ -1339,8 +1342,6 @@ local function cancel_permission_timer(id)
     timers[id] = nil
   end
 end
-
-local schedule_permission_timer
 
 local function latest_subagent_permission_context_headers(permission_id)
   local id = state.render.last_tool_id
@@ -1523,23 +1524,6 @@ local function replace_permission_block(id, lines, should_fold)
   end
   refresh_rendered_output()
   return id
-end
-
-schedule_permission_timer = function(id)
-  id = permission_id(id)
-  state.render.permission_timers = state.render.permission_timers or {}
-  if state.render.permission_timers[id] then
-    return
-  end
-  state.render.permission_timers[id] = vim.fn.timer_start(1000, function()
-    state.render.permission_timers[id] = nil
-    local block = state.render.permission_blocks and state.render.permission_blocks[id]
-    if not block or block.result ~= nil then
-      return
-    end
-    replace_permission_block(id, render_permission_block(block), false)
-    schedule_permission_timer(id)
-  end)
 end
 
 function M.subagent_child_at_line(line)
@@ -2057,9 +2041,6 @@ function M.append_permission_request(id, summary, details, opts)
     finished = false,
     fold = false,
   }, opts)
-  if schedule_permission_timer then
-    schedule_permission_timer(id)
-  end
   if opts.scroll_to_bottom_if_unfocused == true then
     scroll_output_to_bottom({ force = true, preserve_output_focus = true })
   end
