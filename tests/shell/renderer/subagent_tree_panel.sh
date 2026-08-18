@@ -114,6 +114,29 @@ ui.show()
 renderer.clear('subagent tree parent')
 assert(not valid_win(state.ui.subagent_tree_win), 'agent tree must stay hidden when no subagents exist')
 
+vim.api.nvim_buf_set_lines(state.ui.input_buf, 0, -1, false, { 'root draft', 'still typed' })
+state.render.tool_blocks['newline-subagent-tree'] = {
+  start_line = 1,
+  end_line = 1,
+  subagent_children = {
+    {
+      name = 'reviewer',
+      agent = 'reviewer',
+      status = 'running',
+      active = true,
+      action = 'permission requested\nwhile root input has text',
+      lines = { '# child' },
+    },
+  },
+}
+assert(ui.refresh_subagent_tree(), 'subagent tree with multiline action should render')
+local newline_tree = buf_text(state.ui.subagent_tree_buf)
+assert(newline_tree:find('reviewer - permission requested while root input', 1, true), newline_tree)
+assert(newline_tree:find('\nwhile root input', 1, true) == nil, newline_tree)
+renderer.clear('after multiline subagent tree action')
+assert(not valid_win(state.ui.subagent_tree_win), 'multiline action cleanup should close the agent tree')
+ui.clear_input()
+
 renderer.handle_event({
   type = 'tool_execution_start',
   toolCallId = 'single-subagent-tree',

@@ -871,13 +871,26 @@ function M.close_visible_extension_interaction_for_runtime(runtime_key)
   return false
 end
 
+local function sanitized_buffer_lines(lines)
+  local out = {}
+  for _, line in ipairs(lines or {}) do
+    if line == nil or line == vim.NIL then
+      table.insert(out, '')
+    else
+      local text = tostring(line):gsub('\r\n', ' '):gsub('[\r\n]+', ' ')
+      table.insert(out, text)
+    end
+  end
+  return out
+end
+
 local function set_buffer_lines(bufnr, lines, filetype)
   if not valid_buf(bufnr) then
     return false
   end
   vim.bo[bufnr].filetype = filetype or 'markdown'
   set_buf_modifiable(bufnr, true)
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines or {})
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, sanitized_buffer_lines(lines))
   set_buf_modifiable(bufnr, false)
   set_buf_readonly(bufnr, true)
   return true
