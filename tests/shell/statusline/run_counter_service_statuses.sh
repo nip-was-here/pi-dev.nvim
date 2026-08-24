@@ -63,6 +63,14 @@ assert(line:find('load 1', 1, true), line)
 assert(line:find('compact 1', 1, true), line)
 assert(line:find('retry 1', 1, true), line)
 assert(line:find('queue 1', 1, true), line)
+
+local pending_wait = state.ensure_rpc_runtime('pending-wait')
+pending_wait.job_id = 707
+pending_wait.active = false
+pending_wait.status = 'idle'
+pending_wait.pending_extension_ui_request = { id = 'background-permission', method = 'select' }
+line = statusline.render_for_width(120)
+assert(line:find('wait 1', 1, true), line)
 LUA
 
 output="$(pidev_nvim_output +"luafile $tmp_lua" 2>&1)" || {

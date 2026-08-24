@@ -470,7 +470,7 @@ local function runtime_badge_status(runtime)
   if runtime.error then
     return 'error'
   end
-  if runtime.waiting_input then
+  if runtime.waiting_input or has_pending_interaction(runtime) then
     return 'waiting input'
   end
   if runtime.active then
