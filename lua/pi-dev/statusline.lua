@@ -128,8 +128,40 @@ local function is_interactive_extension_request(event)
   return method == 'confirm' or method == 'select' or method == 'input' or method == 'editor'
 end
 
+local function runtime_owns_waiting_input(runtime)
+  runtime = runtime or state.active_rpc_runtime()
+  return runtime and (runtime.subagent_waiting_input == true or has_pending_interaction(runtime))
+end
+
+local function runtime_has_waiting_input(runtime)
+  runtime = runtime or state.active_rpc_runtime()
+  return runtime and (runtime.waiting_input == true or runtime_owns_waiting_input(runtime))
+end
+
+local function subagent_waiting_from_event(event)
+  local name = event and (event.toolName or event.tool_name or event.name)
+  local ok, subagent = pcall(require, 'pi-dev.compat.subagent')
+  if not (ok and subagent.is_tool and subagent.is_tool(name)) then
+    return nil
+  end
+  local source = event.partialResult or event.partial_result or event.result
+  if type(source) ~= 'table' then
+    return false
+  end
+  return subagent.has_waiting_child and subagent.has_waiting_child(source) or false
+end
+
+local function update_active_subagent_waiting_input(event)
+  local waiting = subagent_waiting_from_event(event)
+  if waiting == nil then
+    return
+  end
+  local runtime = state.active_rpc_runtime()
+  runtime.subagent_waiting_input = waiting == true
+end
+
 local function baseline_status()
-  if state.statusline.waiting_input or has_pending_interaction() then
+  if state.statusline.waiting_input or runtime_has_waiting_input() then
     return 'waiting input'
   end
   if state.statusline.active then
@@ -176,7 +208,7 @@ function M.short_status_label(status)
 end
 
 local function runtime_status()
-  if state.statusline.waiting_input or has_pending_interaction() then
+  if state.statusline.waiting_input or runtime_has_waiting_input() then
     return 'waiting input'
   end
   if state.statusline.active then
@@ -276,7 +308,7 @@ function M.update_from_state(data, opts)
   local runtime = target_runtime(opts)
   if not opts.runtime and not opts.runtime_key and not state.is_job_running(runtime) and state.statusline.active then
     runtime.active = state.statusline.active == true
-    runtime.waiting_input = state.statusline.waiting_input == true
+    runtime.waiting_input = state.statusline.waiting_input == true or runtime.subagent_waiting_input == true
     runtime.status = state.statusline.status
   end
   local model = compact_model(data.model)
@@ -301,11 +333,11 @@ function M.update_from_state(data, opts)
   if data.isStreaming == true then
     runtime.loading = false
     runtime.active = true
-    runtime.waiting_input = has_pending_interaction(runtime)
+    runtime.waiting_input = runtime_has_waiting_input(runtime)
   elseif data.isStreaming == false then
     runtime.loading = false
     runtime.active = false
-    runtime.waiting_input = has_pending_interaction(runtime)
+    runtime.waiting_input = runtime_has_waiting_input(runtime)
   end
   if data.isCompacting == true then
     if runtime.status ~= 'compacting' then
@@ -320,11 +352,12 @@ function M.update_from_state(data, opts)
     local streaming_known = not is_nil(data.isStreaming)
     local active = streaming_known and data.isStreaming == true or runtime.compaction_previous_active == true
     runtime.active = active
-    runtime.waiting_input = active and runtime.compaction_previous_waiting_input == true or has_pending_interaction(runtime)
+    runtime.waiting_input = runtime_has_waiting_input(runtime) or (active and runtime.compaction_previous_waiting_input == true) or false
     runtime.compaction_previous_active = nil
     runtime.compaction_previous_waiting_input = nil
     runtime.status = runtime.waiting_input and 'waiting input' or (runtime.active and 'running' or (state.is_job_running(runtime) and 'idle' or 'not connected'))
   elseif data.isStreaming ~= nil or data.model ~= nil then
+    runtime.waiting_input = runtime_has_waiting_input(runtime)
     runtime.status = runtime.waiting_input and 'waiting input' or (runtime.active and 'running' or (state.is_job_running(runtime) and 'idle' or 'not connected'))
   end
   sync_runtime_status(runtime)
@@ -379,14 +412,15 @@ function M.handle_event(event)
     state.statusline.loading = false
     state.statusline.status = 'not connected'
   elseif event.type == 'agent_start' then
+    state.active_rpc_runtime().subagent_waiting_input = false
     state.statusline.error = nil
     state.statusline.loading = false
     state.statusline.active = true
-    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.waiting_input = runtime_owns_waiting_input()
     state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
   elseif event.type == 'agent_end' then
     state.statusline.active = false
-    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.waiting_input = runtime_owns_waiting_input()
     state.statusline.compaction_previous_active = nil
     state.statusline.compaction_previous_waiting_input = nil
     state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'idle'
@@ -396,7 +430,7 @@ function M.handle_event(event)
       state.statusline.compaction_previous_waiting_input = state.statusline.waiting_input == true
     end
     state.statusline.active = true
-    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.waiting_input = runtime_owns_waiting_input()
     state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'compacting'
     clear_stats(state.statusline)
     clear_stats(state.active_rpc_runtime())
@@ -404,13 +438,13 @@ function M.handle_event(event)
     local streaming_known = not is_nil(event.isStreaming)
     local active = streaming_known and event.isStreaming == true or state.statusline.compaction_previous_active == true
     state.statusline.active = active
-    state.statusline.waiting_input = has_pending_interaction() or (active and state.statusline.compaction_previous_waiting_input == true) or false
+    state.statusline.waiting_input = runtime_owns_waiting_input() or (active and state.statusline.compaction_previous_waiting_input == true) or false
     state.statusline.compaction_previous_active = nil
     state.statusline.compaction_previous_waiting_input = nil
     state.statusline.status = baseline_status()
   elseif event.type == 'auto_retry_start' then
     state.statusline.active = true
-    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.waiting_input = runtime_owns_waiting_input()
     state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'retrying'
   elseif event.type == 'auto_retry_end' then
     state.statusline.status = baseline_status()
@@ -420,27 +454,30 @@ function M.handle_event(event)
       M.clear_error()
     end
     if role == 'user' or role == 'assistant' then
+      state.active_rpc_runtime().subagent_waiting_input = false
       state.statusline.loading = false
       state.statusline.active = true
-      state.statusline.waiting_input = has_pending_interaction()
+      state.statusline.waiting_input = runtime_owns_waiting_input()
       state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
     end
   elseif event.type == 'message_update' then
     state.statusline.active = true
-    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.waiting_input = runtime_owns_waiting_input()
     state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
   elseif event.type == 'tool_execution_start' or event.type == 'tool_execution_update' then
+    update_active_subagent_waiting_input(event)
     state.statusline.active = true
-    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.waiting_input = runtime_owns_waiting_input()
     state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
   elseif event.type == 'tool_execution_end' then
+    update_active_subagent_waiting_input(event)
     state.statusline.active = true
-    state.statusline.waiting_input = has_pending_interaction()
+    state.statusline.waiting_input = runtime_owns_waiting_input()
     state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
   elseif event.type == 'queue_update' then
     state.statusline.status = state.statusline.active and 'queue update' or runtime_status()
   elseif event.type == 'extension_ui_request' then
-    state.statusline.waiting_input = is_interactive_extension_request(event) and (state.statusline.active == true or state.is_job_running()) or false
+    state.statusline.waiting_input = runtime_has_waiting_input() or (is_interactive_extension_request(event) and (state.statusline.active == true or state.is_job_running())) or false
     state.statusline.status = runtime_status()
   elseif event.type == 'extension_error' then
     M.set_error(event.error or 'extension error', { notice = false })
@@ -449,7 +486,7 @@ function M.handle_event(event)
   local runtime = state.active_rpc_runtime()
   runtime.status = state.statusline.status
   runtime.active = state.statusline.active == true
-  runtime.waiting_input = state.statusline.waiting_input == true
+  runtime.waiting_input = state.statusline.waiting_input == true or runtime.subagent_waiting_input == true
   runtime.loading = state.statusline.loading == true
   runtime.error = state.statusline.error
   sync_runtime_status(runtime)
@@ -470,7 +507,7 @@ local function runtime_badge_status(runtime)
   if runtime.error then
     return 'error'
   end
-  if runtime.waiting_input or has_pending_interaction(runtime) then
+  if runtime_has_waiting_input(runtime) then
     return 'waiting input'
   end
   if runtime.active then
@@ -526,7 +563,7 @@ local function aggregate_status_label(info)
       sole_connected_status = status
       if runtime.error or status == 'error' then
         errors = errors + 1
-      elseif runtime.waiting_input or status == 'waiting input' then
+      elseif runtime_has_waiting_input(runtime) or status == 'waiting input' then
         waiting = waiting + 1
       elseif status == 'running' then
         running = running + 1

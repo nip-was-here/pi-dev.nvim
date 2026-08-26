@@ -52,11 +52,35 @@ local function is_interactive_extension_request(message)
   return method == 'confirm' or method == 'select' or method == 'input' or method == 'editor'
 end
 
+local function runtime_has_waiting_input(runtime)
+  return runtime and (runtime.waiting_input == true or runtime.subagent_waiting_input == true or has_pending_interaction(runtime))
+end
+
+local function subagent_waiting_from_event(message)
+  local name = message and (message.toolName or message.tool_name or message.name)
+  local ok, subagent = pcall(require, 'pi-dev.compat.subagent')
+  if not (ok and subagent.is_tool and subagent.is_tool(name)) then
+    return nil
+  end
+  local source = message.partialResult or message.partial_result or message.result
+  if type(source) ~= 'table' then
+    return false
+  end
+  return subagent.has_waiting_child and subagent.has_waiting_child(source) or false
+end
+
+local function update_subagent_waiting_input(runtime, message)
+  local waiting = subagent_waiting_from_event(message)
+  if waiting ~= nil then
+    runtime.subagent_waiting_input = waiting == true
+  end
+end
+
 local function runtime_status(runtime)
   if runtime.error then
     return 'error'
   end
-  if runtime.waiting_input or has_pending_interaction(runtime) then
+  if runtime_has_waiting_input(runtime) then
     return 'waiting input'
   end
   if runtime.active then
@@ -121,6 +145,7 @@ local function idle_stop_eligible(runtime)
     and state.is_job_running(runtime)
     and runtime.active ~= true
     and runtime.waiting_input ~= true
+    and runtime.subagent_waiting_input ~= true
     and not has_pending_interaction(runtime)
     and not has_local_draft(runtime)
     and not runtime.error
@@ -381,19 +406,21 @@ local function update_runtime_from_event(runtime, message)
   if not runtime or type(message) ~= 'table' then
     return
   end
-  if message.type == 'tool_execution_start' or message.type == 'tool_execution_end' then
+  if message.type == 'tool_execution_start' or message.type == 'tool_execution_update' or message.type == 'tool_execution_end' then
     update_runtime_tool_timing(runtime, message)
+    update_subagent_waiting_input(runtime, message)
   end
   if message.type == 'agent_start' then
     runtime.loading = false
     runtime.active = true
+    runtime.subagent_waiting_input = false
     runtime.waiting_input = has_pending_interaction(runtime)
     runtime.error = nil
     runtime.status = runtime_status(runtime)
     clear_idle_timer(runtime)
   elseif message.type == 'agent_end' then
     runtime.active = false
-    if has_pending_interaction(runtime) then
+    if runtime_has_waiting_input(runtime) then
       runtime.waiting_input = true
       runtime.status = 'waiting input'
     else
@@ -404,6 +431,7 @@ local function update_runtime_from_event(runtime, message)
   elseif message.type == 'message_start' then
     runtime.loading = false
     runtime.active = true
+    runtime.subagent_waiting_input = false
     runtime.waiting_input = has_pending_interaction(runtime)
     runtime.status = runtime_status(runtime)
     clear_idle_timer(runtime)
@@ -414,12 +442,12 @@ local function update_runtime_from_event(runtime, message)
     clear_idle_timer(runtime)
   elseif message.type == 'tool_execution_start' or message.type == 'tool_execution_update' then
     runtime.active = true
-    runtime.waiting_input = has_pending_interaction(runtime)
+    runtime.waiting_input = runtime_has_waiting_input(runtime)
     runtime.status = runtime_status(runtime)
     clear_idle_timer(runtime)
   elseif message.type == 'tool_execution_end' then
     runtime.active = true
-    runtime.waiting_input = has_pending_interaction(runtime)
+    runtime.waiting_input = runtime_has_waiting_input(runtime)
     runtime.status = runtime_status(runtime)
     clear_idle_timer(runtime)
   elseif message.type == 'queue_update' then
@@ -434,7 +462,7 @@ local function update_runtime_from_event(runtime, message)
     runtime.status = 'error'
   elseif message.type == 'compaction_start' or message.type == 'auto_retry_start' then
     runtime.active = true
-    runtime.waiting_input = has_pending_interaction(runtime)
+    runtime.waiting_input = runtime_has_waiting_input(runtime)
     runtime.status = runtime.waiting_input and 'waiting input' or (message.type == 'compaction_start' and 'compacting' or 'retrying')
     if message.type == 'compaction_start' then
       runtime.cost = nil
@@ -445,7 +473,7 @@ local function update_runtime_from_event(runtime, message)
   elseif message.type == 'compaction_end' then
     if message.isStreaming ~= nil and message.isStreaming ~= vim.NIL then
       runtime.active = message.isStreaming == true
-      runtime.waiting_input = has_pending_interaction(runtime)
+      runtime.waiting_input = runtime_has_waiting_input(runtime)
     end
     runtime.status = runtime_status(runtime)
   elseif message.type == 'auto_retry_end' then
@@ -469,7 +497,7 @@ local function handle_response(runtime, message)
     end
     if message.data.isStreaming == false and runtime.active then
       runtime.active = false
-      if has_pending_interaction(runtime) then
+      if runtime_has_waiting_input(runtime) then
         runtime.waiting_input = true
         runtime.status = 'waiting input'
       else
@@ -644,6 +672,7 @@ function M.start(key, opts)
   runtime.stderr = {}
   runtime.active = false
   runtime.waiting_input = false
+  runtime.subagent_waiting_input = false
   runtime.pending_extension_ui_request = nil
   runtime.error = nil
   state.set_runtime_loading(runtime, true, { lock_input = false })

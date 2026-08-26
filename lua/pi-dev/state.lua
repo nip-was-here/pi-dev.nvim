@@ -79,6 +79,7 @@ local function runtime_defaults(key)
     status = 'not connected',
     active = false,
     waiting_input = false,
+    subagent_waiting_input = false,
     loading = false,
     loading_lock = false,
     error = nil,
@@ -113,7 +114,7 @@ local function sync_statusline_from_runtime(runtime)
   local loading = runtime.loading == true and runtime.status == 'loading'
   M.statusline.status = loading and 'loading' or (runtime.status or (runtime.job_id and 'idle' or 'not connected'))
   M.statusline.active = runtime.active == true
-  M.statusline.waiting_input = runtime.waiting_input == true
+  M.statusline.waiting_input = runtime.waiting_input == true or runtime.subagent_waiting_input == true
   M.statusline.loading = loading
   M.statusline.error = runtime.error
   M.statusline.model = runtime.model
@@ -281,6 +282,7 @@ function M.reset_rpc_runtime(runtime, remove)
   runtime.pending = {}
   runtime.active = false
   runtime.waiting_input = false
+  runtime.subagent_waiting_input = false
   runtime.loading = false
   runtime.loading_lock = false
   runtime.status = 'not connected'
