@@ -50,6 +50,7 @@ renderer/fold_count_commands.sh	1.3s
 renderer/format_timestamps.sh	0.5s
 renderer/markdown_refresh.sh	1.1s
 renderer/misc_events_and_roles.sh	0.5s
+renderer/native_tool_summaries.sh	0.6s
 renderer/performance_coalescing.sh	0.6s
 renderer/pipeline_spec.sh	0.5s
 renderer/read_visual_autofold.sh	0.5s
@@ -63,6 +64,7 @@ renderer/subagent_workflow_start_context.sh	0.6s
 renderer/subagent_buffer_navigation.sh	0.6s
 renderer/subagent_open_live_refresh.sh	0.6s
 renderer/subagent_status_text_tree.sh	0.6s
+renderer/subagent_wait_compact.sh	0.6s
 renderer/thinking_autofold_threshold.sh	0.5s
 renderer/thinking_whitespace_cleanup.sh	0.5s
 renderer/tool_autofold_chunked.sh	0.6s

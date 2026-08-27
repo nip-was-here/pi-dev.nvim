@@ -3,6 +3,8 @@
 local config = require('pi-dev.config')
 local message_content = require('pi-dev.message_content')
 local pipeline = require('pi-dev.render_pipeline')
+local native_tools = require('pi-dev.renderer.native_tools')
+local tool_format = require('pi-dev.renderer.tool_format')
 local subagent = require('pi-dev.compat.subagent')
 local tool_identity = require('pi-dev.tool_identity')
 
@@ -87,6 +89,43 @@ local function compact_empty_section_line(label)
   return { tostring(label or 'Value') .. ': `empty`' }
 end
 
+local function generic_visible_summary_lines(tool_name, args)
+  if native_tools.is_native(tool_name) or subagent.is_tool(tool_name) or type(args) ~= 'table' then
+    return nil
+  end
+  if tool_name == 'bash' or tool_name == 'read' or tool_name == 'write' or tool_name == 'edit' then
+    return nil
+  end
+  local labels = {
+    { 'target', { 'tool', 'target', 'name' } },
+    { 'action', { 'action' } },
+    { 'server', { 'server' } },
+    { 'path', { 'path', 'file_path', 'filepath' } },
+    { 'url', { 'url' } },
+    { 'query', { 'query', 'search' } },
+    { 'response', { 'responseId', 'response_id' } },
+  }
+  local lines = {}
+  for _, group in ipairs(labels) do
+    local label, fields = group[1], group[2]
+    local value = tool_format.first_present(args, fields)
+    if value ~= nil then
+      table.insert(lines, label .. ': ' .. tool_format.inline_code(tool_format.compact_text(value, 120)))
+    end
+  end
+  if args.args ~= nil and args.args ~= vim.NIL and type(args.args) ~= 'string' then
+    table.insert(lines, 'args: ' .. tool_format.json_inline(args.args, 180))
+  end
+  return #lines > 0 and lines or nil
+end
+
+local function visible_summary_lines(tool_name, args, result)
+  if subagent.is_wait_tool and subagent.is_wait_tool(tool_name) then
+    return subagent.wait_visible_summary_lines(args, result)
+  end
+  return native_tools.visible_summary_lines(tool_name, args, result) or generic_visible_summary_lines(tool_name, args)
+end
+
 local function compact_tool_input(tool_name, args)
   if type(args) ~= 'table' then
     local text = normalize_line_endings(args or '')
@@ -98,6 +137,15 @@ local function compact_tool_input(tool_name, args)
 
   if subagent.is_tool(tool_name) then
     return subagent.summary(args), nil, false
+  end
+
+  if subagent.is_wait_tool and subagent.is_wait_tool(tool_name) then
+    return subagent.wait_summary(args), subagent.wait_args_to_lines(args), false
+  end
+
+  local native_summary, native_input_lines, native_omit_input_detail = native_tools.compact_input(tool_name, args)
+  if native_summary then
+    return native_summary, native_input_lines, native_omit_input_detail
   end
 
   local path = tool_path(args)
@@ -175,6 +223,15 @@ local function tool_args_to_lines(tool_name, args)
 
   if subagent.is_tool(tool_name) then
     return subagent.args_to_lines(args)
+  end
+
+  if subagent.is_wait_tool and subagent.is_wait_tool(tool_name) then
+    return subagent.wait_args_to_lines(args)
+  end
+
+  local native_lines = native_tools.args_to_lines(tool_name, args)
+  if native_lines then
+    return native_lines
   end
 
   if tool_name == 'read' then
@@ -426,6 +483,9 @@ end
 
 local function result_to_lines(result, tool_name, args, opts)
   opts = opts or {}
+  local function finalize(lines)
+    return native_tools.result_to_lines(tool_name, lines)
+  end
   local text
   if type(result) == 'string' then
     text = result
@@ -440,41 +500,44 @@ local function result_to_lines(result, tool_name, args, opts)
   if is_no_output_sentinel(text) then
     text = ''
   end
+  if subagent.is_wait_tool and subagent.is_wait_tool(tool_name) then
+    return subagent.wait_result_to_lines(result, text, opts)
+  end
   local readable = readable_tool_result(tool_name, result, args, text, opts)
   if readable then
-    return readable
+    return finalize(readable)
   end
   if text == '' and type(result) == 'table' then
     for _, field in ipairs({ 'output', 'text', 'result', 'response', 'data' }) do
       if type(result[field]) == 'table' then
-        return pretty_json_lines(result[field])
+        return finalize(pretty_json_lines(result[field]))
       end
     end
     if result.content == nil and result.stdout == nil and result.stderr == nil and next(result) ~= nil then
-      return pretty_json_lines(result)
+      return finalize(pretty_json_lines(result))
     end
   end
   if text == '' then
-    return denied and {} or compact_empty_section_line('Output')
+    return finalize(denied and {} or compact_empty_section_line('Output'))
   end
   if looks_like_diff(text) then
-    return diff_fenced_lines(text)
+    return finalize(diff_fenced_lines(text))
   end
   local pretty = pretty_json_lines_from_text(text)
   if pretty then
-    return pretty
+    return finalize(pretty)
   end
   if type(result) == 'table' then
     for _, field in ipairs({ 'output', 'text', 'result', 'response', 'data' }) do
       if type(result[field]) == 'table' then
-        return pretty_json_lines(result[field])
+        return finalize(pretty_json_lines(result[field]))
       end
     end
     if result.content == nil and result.stdout == nil and result.stderr == nil then
-      return pretty_json_lines(result)
+      return finalize(pretty_json_lines(result))
     end
   end
-  return vim.split(normalize_line_endings(text), '\n', { plain = true })
+  return finalize(vim.split(normalize_line_endings(text), '\n', { plain = true }))
 end
 
 
@@ -482,5 +545,6 @@ M.path = tool_path
 M.compact_input = compact_tool_input
 M.args_to_lines = tool_args_to_lines
 M.result_to_lines = result_to_lines
+M.visible_summary_lines = visible_summary_lines
 
 return M
