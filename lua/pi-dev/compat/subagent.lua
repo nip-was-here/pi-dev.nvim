@@ -622,7 +622,51 @@ local function append_message_block(lines, title, text, opts)
   return true
 end
 
-local function append_tool_transcript_block(lines, name, args, result_text, status)
+local result_text_from_message
+
+local function shared_tool_renderer()
+  local loaded = package.loaded['pi-dev.renderer.tools']
+  if type(loaded) == 'table' then
+    return loaded
+  end
+  local ok, tools = pcall(require, 'pi-dev.renderer.tools')
+  return ok and tools or nil
+end
+
+local function transcript_tool_input_lines(name, args)
+  local tools = shared_tool_renderer()
+  if type(args) == 'table' and tools and tools.args_to_lines and not M.is_tool(name) then
+    local ok, rendered = pcall(tools.args_to_lines, name, args)
+    if ok and type(rendered) == 'table' and #rendered > 0 then
+      return rendered
+    end
+  end
+  local lines = {}
+  append_value_lines(lines, args, name == 'bash' and 'bash' or '')
+  return lines
+end
+
+local function transcript_tool_output_lines(name, args, result)
+  if result == nil or result == vim.NIL then
+    return {}
+  end
+  local tools = shared_tool_renderer()
+  if tools and tools.result_to_lines and not M.is_tool(name) then
+    local ok, rendered = pcall(tools.result_to_lines, result, name, args, {})
+    if ok and type(rendered) == 'table' then
+      return rendered
+    end
+  end
+  local text = result_text_from_message(result)
+  if vim.trim(normalize_line_endings(text)) == '' then
+    return {}
+  end
+  local lines = {}
+  append_wrapped_text(lines, text, { min_heading_level = 5, max_heading_level = 6 })
+  return lines
+end
+
+local function append_tool_transcript_block(lines, name, args, result, status)
   if #lines > 0 and lines[#lines] ~= '' then
     table.insert(lines, '')
   end
@@ -633,16 +677,19 @@ local function append_tool_transcript_block(lines, name, args, result_text, stat
   if args ~= nil then
     table.insert(lines, '')
     table.insert(lines, '#### Input')
-    append_value_lines(lines, args, name == 'bash' and 'bash' or '')
+    vim.list_extend(lines, transcript_tool_input_lines(name, args))
   end
-  if result_text and vim.trim(normalize_line_endings(result_text)) ~= '' then
+  local output_lines = transcript_tool_output_lines(name, args, result)
+  if #output_lines > 0 then
     table.insert(lines, '')
-    table.insert(lines, '#### Output')
-    append_wrapped_text(lines, result_text, { min_heading_level = 5, max_heading_level = 6 })
+    if not tostring(output_lines[1] or ''):match('^%s*#+%s+') then
+      table.insert(lines, '#### Output')
+    end
+    vim.list_extend(lines, output_lines)
   end
 end
 
-local function result_text_from_message(message)
+result_text_from_message = function(message)
   if type(message) ~= 'table' then
     return ''
   end
@@ -1031,14 +1078,14 @@ local function transcript_lines_from_messages(messages, progress)
             if result_message then
               rendered_results[id] = true
             end
-            append_tool_transcript_block(lines, tool_call_name(item), tool_call_args(item), result_text_from_message(result_message), result_message and 'done' or 'run')
+            append_tool_transcript_block(lines, tool_call_name(item), tool_call_args(item), result_message, result_message and 'done' or 'run')
           end
         end
       end
     elseif type(message) == 'table' and message.role == 'toolResult' then
       local id = tool_result_id(message)
       if not (id and rendered_results[id]) then
-        append_tool_transcript_block(lines, 'tool', nil, result_text_from_message(message), 'done')
+        append_tool_transcript_block(lines, message.toolName or message.tool_name or 'tool', nil, message, 'done')
       end
     elseif type(message) == 'table' then
       local role = tostring(message.role or message.type or 'Message')
@@ -1054,6 +1101,113 @@ local function transcript_lines_from_messages(messages, progress)
   end
 
   return #lines > 0 and lines or nil
+end
+
+local function decoded_transcript_args(record)
+  if type(record) ~= 'table' then
+    return nil
+  end
+  if type(record.args) == 'table' then
+    return record.args
+  end
+  if type(record.argsPayload) == 'string' and record.argsPayload ~= '' then
+    local ok, decoded = pcall(vim.json.decode, record.argsPayload)
+    if ok then
+      return decoded
+    end
+    return record.argsPayload
+  end
+  return record.argsPreview
+end
+
+function M.transcript_record_lines(records)
+  local messages = {}
+  local tools_by_id = {}
+  local tool_order = {}
+  local extra_lines = {}
+  for _, record in ipairs(type(records) == 'table' and records or {}) do
+    local kind = record.recordType
+    if kind == 'message' and type(record.message) == 'table' then
+      table.insert(messages, record.message)
+    elseif kind == 'tool_start' then
+      local id = tostring(record.toolCallId or ('tool-' .. tostring(#tool_order + 1)))
+      if not tools_by_id[id] then
+        table.insert(tool_order, id)
+      end
+      tools_by_id[id] = {
+        id = id,
+        name = record.toolName or 'tool',
+        args = decoded_transcript_args(record),
+        status = 'run',
+      }
+    elseif kind == 'tool_end' then
+      local id = tostring(record.toolCallId or '')
+      if id ~= '' and tools_by_id[id] then
+        tools_by_id[id].status = record.isError and 'error' or 'done'
+      end
+    elseif kind == 'stdout' or kind == 'stderr' then
+      local text = tostring(record.text or '')
+      if vim.trim(text) ~= '' then
+        append_message_block(extra_lines, kind == 'stderr' and 'Stderr' or 'Stdout', text)
+      end
+    elseif kind == 'truncated' then
+      append_message_block(extra_lines, 'Transcript', record.message or 'Child transcript was truncated.')
+    end
+  end
+
+  local represented = {}
+  for _, message in ipairs(messages) do
+    if type(message) == 'table' and type(message.content) == 'table' then
+      for _, item in ipairs(message.content) do
+        if is_tool_call_item(item) then
+          local id = tool_call_id(item)
+          if id then
+            represented[id] = true
+          end
+        end
+      end
+    end
+    local result_id = tool_result_id(message)
+    if result_id then
+      represented[result_id] = true
+    end
+  end
+
+  local lines = transcript_lines_from_messages(messages) or {}
+  for _, id in ipairs(tool_order) do
+    local tool = tools_by_id[id]
+    if tool and not represented[id] then
+      append_tool_transcript_block(lines, tool.name, tool.args, nil, tool.status)
+    end
+  end
+  vim.list_extend(lines, extra_lines)
+  return lines
+end
+
+function M.replace_result_lines(lines, result_lines)
+  local source = type(lines) == 'table' and lines or {}
+  local replacement = type(result_lines) == 'table' and result_lines or {}
+  local out = {}
+  local result_index
+  for index, line in ipairs(source) do
+    table.insert(out, line)
+    if line == '## Result' then
+      result_index = index
+      break
+    end
+  end
+  if not result_index then
+    if #out > 0 and out[#out] ~= '' then
+      table.insert(out, '')
+    end
+    table.insert(out, '## Result')
+  end
+  vim.list_extend(out, replacement)
+  if source[#source] == '> _Subagent done._' then
+    table.insert(out, '')
+    table.insert(out, source[#source])
+  end
+  return out
 end
 
 local function async_status_name(step, index)
@@ -1089,6 +1243,7 @@ local function async_status_item(step, index, status)
     toolCount = step.toolCount,
     turnCount = step.turnCount,
     tokens = tokens,
+    transcriptPath = step.transcriptPath,
     durationMs = tonumber(step.durationMs) or (started_at and updated_at and math.max(0, updated_at - started_at) or nil),
   }
   return {
@@ -1099,6 +1254,7 @@ local function async_status_item(step, index, status)
     skills = string_list(step.skills),
     model = step.model,
     thinking = step.thinking,
+    transcriptPath = step.transcriptPath,
     task = progress.task,
     status = progress.status,
     state = progress.status,
@@ -1648,6 +1804,7 @@ nested_child_from_summary = function(item, stable_key)
     action = item.currentTool and nested_action(item) or latest_command or nested_action(item),
     children = children,
     active = not nested_terminal_statuses[status:lower()],
+    transcript_path = item.transcriptPath,
     lines = child_buffer_lines(name, main_info, result_lines, status),
   }
 end
@@ -1783,6 +1940,7 @@ function M.result_to_lines(source, text, opts)
         status = status,
         action = current_action,
         children = nested_children,
+        transcript_path = item.transcriptPath or (type(progress) == 'table' and progress.transcriptPath or nil),
         lines = child_buffer_lines(title, main_info, result_lines, status),
       })
     else

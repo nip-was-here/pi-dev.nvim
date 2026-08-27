@@ -11,6 +11,7 @@ local markdown = require('pi-dev.markdown')
 local renderer = require('pi-dev.renderer')
 local state = require('pi-dev.state')
 local subagent = require('pi-dev.compat.subagent')
+local subagent_transcript = require('pi-dev.compat.subagent_transcript')
 local statusline = require('pi-dev.statusline')
 
 local M = {}
@@ -907,6 +908,40 @@ local function subagent_view_lines_with_permissions(view, base_lines)
   return lines
 end
 
+local function render_subagent_view(view)
+  if not view then
+    return false
+  end
+  local child_lines = view.child and view.child.lines or view.base_lines or {}
+  local lines = subagent.replace_title(child_lines, view.title, view.depth)
+  if type(view.transcript_lines) == 'table' and #view.transcript_lines > 0 then
+    lines = subagent.replace_result_lines(lines, view.transcript_lines)
+  end
+  view.base_lines = lines
+  return set_buffer_lines(view.buf, subagent_view_lines_with_permissions(view), config.options.ui.output_filetype)
+end
+
+local function watch_subagent_transcript(view)
+  subagent_transcript.stop()
+  if not (view and view.transcript_path and view.transcript_path ~= '') then
+    return false
+  end
+  return subagent_transcript.watch({
+    path = view.transcript_path,
+    is_current = function()
+      return state.ui.subagent_view == view
+    end,
+    on_records = function(records)
+      if state.ui.subagent_view ~= view then
+        return
+      end
+      view.transcript_lines = subagent.transcript_record_lines(records)
+      render_subagent_view(view)
+      markdown.refresh_output()
+    end,
+  })
+end
+
 local function open_subagent_child(child)
   if not child then
     return false
@@ -921,13 +956,16 @@ local function open_subagent_child(child)
     parent_tool_call_id = child.parent_tool_call_id,
     child_header = child.header,
     child_key = child.key,
+    child = child,
+    transcript_path = child.transcript_path,
   }
   view.output_title = subagent.title_text(view.title, depth)
   local bufnr_new = subagent.ensure_view_buffer(view, state.ui, buffers.setup_buffer, config.options.ui.output_filetype)
-  view.base_lines = subagent.replace_title(child.lines or {}, view.title, depth)
-  set_buffer_lines(bufnr_new, subagent_view_lines_with_permissions(view), config.options.ui.output_filetype)
+  view.buf = bufnr_new
+  render_subagent_view(view)
   state.ui.subagent_view = view
   state.ui.output_title = view.output_title
+  watch_subagent_transcript(view)
   M.show()
   if valid_win(state.ui.output_win) then
     unlock_window_buffer(state.ui.output_win)
@@ -1168,7 +1206,9 @@ function M.refresh_subagent_tree()
   set_buffer_lines(state.ui.subagent_tree_buf, lines, 'text')
   set_subagent_tree_keymaps(state.ui.subagent_tree_buf)
 
-  local height = math.min(8, math.max(1, #lines + 2))
+  local configured_max_height = config.options.ui and config.options.ui.agent_tree and config.options.ui.agent_tree.max_height
+  local max_height = math.max(1, math.floor(tonumber(configured_max_height) or config.defaults.ui.agent_tree.max_height))
+  local height = math.min(max_height, math.max(1, #lines + 2))
   if valid_win(state.ui.subagent_tree_win) then
     if vim.api.nvim_win_get_buf(state.ui.subagent_tree_win) ~= state.ui.subagent_tree_buf then
       unlock_window_buffer(state.ui.subagent_tree_win)
@@ -1214,6 +1254,7 @@ function M.close_subagent_view(opts)
   if not view then
     return false
   end
+  subagent_transcript.stop()
   state.ui.subagent_view = opts.parent_view
   local target_buf = state.ui.output_buf
   local target_title = view.parent_title or 'Pi chat'
@@ -1227,6 +1268,9 @@ function M.close_subagent_view(opts)
     pcall(vim.api.nvim_win_set_buf, state.ui.output_win, target_buf)
     lock_window_buffer(state.ui.output_win)
   end
+  if opts.parent_view then
+    watch_subagent_transcript(opts.parent_view)
+  end
   M.refresh_chrome()
   return true
 end
@@ -1234,6 +1278,7 @@ end
 function M.close_all_subagent_views(opts)
   opts = opts or {}
   local changed = state.ui.subagent_view ~= nil
+  subagent_transcript.stop()
   state.ui.subagent_view = nil
   if opts.restore_title ~= false then
     state.ui.output_title = opts.title or state.ui.parent_output_title or state.ui.output_title
@@ -1271,10 +1316,17 @@ local function refresh_subagent_view(view, tool_call_id, children)
     view.title = child.title or child.label or child.name or view.title or 'subagent'
     view.child_header = child.header or view.child_header
     view.child_key = child.key or view.child_key
+    view.child = child
+    if child.transcript_path and child.transcript_path ~= view.transcript_path then
+      view.transcript_path = child.transcript_path
+      view.transcript_lines = nil
+      if state.ui.subagent_view == view then
+        watch_subagent_transcript(view)
+      end
+    end
     view.output_title = subagent.title_text(view.title, view.depth)
-    local bufnr = subagent.ensure_view_buffer(view, state.ui, buffers.setup_buffer, config.options.ui.output_filetype)
-    view.base_lines = subagent.replace_title(child.lines or {}, view.title, view.depth)
-    set_buffer_lines(bufnr, subagent_view_lines_with_permissions(view), config.options.ui.output_filetype)
+    view.buf = subagent.ensure_view_buffer(view, state.ui, buffers.setup_buffer, config.options.ui.output_filetype)
+    render_subagent_view(view)
     return true
   end
   return false

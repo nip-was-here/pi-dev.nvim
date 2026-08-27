@@ -71,8 +71,9 @@ bottom layout is also configurable.
   It lists the root agent and every active descendant recursively. Rows include
   agent identity, role or skills when available, and the latest/current command;
   press `Return` to switch the chat to that agent. Completed subagents stay
-  available from their chat blocks. The window height is capped at eight rows
-  and scrolls when the tree is larger.
+  available from their chat blocks. The window height defaults to eight rows,
+  is configurable with `ui.agent_tree.max_height`, and scrolls when the tree is
+  larger.
 - **Output surface**: conversation, restored session history, Pi responses, tool
   output, service notices, errors, and large tree/waiting/subagent views.
 - **Input surface**: editable prompt buffer for normal user messages.
@@ -179,9 +180,13 @@ declared `runs.run`/`runs.all` children appear immediately from the tool request
 before their first progress update. For local async runs,
 pi-dev.nvim watches the returned lifecycle `status.json` and replaces those
 provisional commands with real step/tool status until the run becomes terminal.
-The focused child chat shows the full
-available child transcript and command history. While descendants are running, a
-compact agent tree appears above the chat and lists `root-agent` plus every active
+The focused child chat shows the full available child transcript and command
+history. It renders thinking plus detailed tool input/output for read, write,
+generic, MCP, and other tool calls using the same formatting as the root chat.
+While a local child is running, pi-dev.nvim follows its bounded transcript
+artifact so the focused buffer updates even though compact parent progress omits
+the full message stream. While descendants are running, a compact agent tree
+appears above the chat and lists `root-agent` plus every active
 child, grandchild, and deeper descendant recursively. Each row ends with the
 latest/current command and its live elapsed time when available. Press `Return`
 in that tree to switch between agent
@@ -281,8 +286,16 @@ Common options:
 | `session_render.max_messages` | `100` | Number of restored messages to render; `0` or `false` renders all history. |
 | `rpc.pool_size` | `8` | Maximum branch-bound runtimes; values above 8 are capped. |
 | `rpc.idle_timeout_ms` | `180000` | Background idle runtime stop delay; `0` disables idle expiry. |
+| `compat.subagent.status.max_bytes` | `2097152` | Maximum local async lifecycle status artifact size read for live child summaries. |
+| `compat.subagent.status.poll_interval_ms` | `1000` | Fallback interval for detecting async lifecycle status updates. |
+| `compat.subagent.status.debounce_ms` | `50` | Delay for coalescing async lifecycle status file events. |
+| `compat.subagent.transcript.max_bytes` | `8388608` | Maximum child transcript artifact size read into a focused subagent buffer. |
+| `compat.subagent.transcript.poll_interval_ms` | `500` | Fallback interval for detecting child transcript updates. |
+| `compat.subagent.transcript.debounce_ms` | `50` | Delay for coalescing child transcript file events. |
 | `ui.position` | `'right'` | Panel position: `'right'` or `'bottom'`. |
 | `ui.width` | `100` | Initial width of the right-side panel; manual resizes are preserved. |
+| `ui.agent_tree.max_height` | `8` | Maximum agent-tree window height. |
+| `ui.render.fold_thinking_over` | `8` | Auto-close thinking detail above this many rendered lines. |
 | `ui.status_separator.enable` | `true` | Show the plugin-owned status separator between output and input panes. |
 | `ui.statusline.enable` | `true` | Legacy alias for `ui.status_separator.enable`. |
 | `keymaps.prefix` | `'<leader>a'` | Prefix used for default normal-mode mappings. |

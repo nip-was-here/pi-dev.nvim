@@ -115,7 +115,8 @@ Agent tree surface ~
   the root agent and every active descendant recursively. Rows include identity,
   role or skills when available, and the latest/current command. Completed
   subagents stay available from their chat blocks, not this tree. The window
-  height is capped at eight rows and scrolls for larger trees. Press `Return` on
+  height defaults to eight rows, is capped by `ui.agent_tree.max_height`, and
+  scrolls for larger trees. Press `Return` on
   a row to switch the chat to the root agent or selected active subagent. When
   only the root remains the tree is hidden. Session, tree, and waiting pickers
   replace the agent tree and chat while they are open.
@@ -467,7 +468,8 @@ Focused subagent buffers ~
   elapsed time when available. Press
   `Return` on `root-agent` to show the root chat, or on an active descendant row
   to show that agent chat. The tree is hidden when only the root remains. Its
-  window height is capped at eight rows and scrolls for larger trees. Completed
+  window height defaults to eight rows, is capped by
+  `ui.agent_tree.max_height`, and scrolls for larger trees. Completed
   subagents do not appear in the tree.
 
   To inspect any child result from the chat, put the cursor anywhere in that
@@ -475,7 +477,13 @@ Focused subagent buffers ~
   `<leader>a]`. The output surface switches to an isolated buffer titled like
   `Pi chat subagent (deep N): ...`. The focused buffer shows the full child
   transcript and command history available in the Pi subagent result, plus the
-  same main information retained in its parent chat.
+  same main information retained in its parent chat. Thinking and detailed tool
+  input/output use the same rendering helpers as the root chat, including read,
+  write, generic, MCP, and other tool calls. While a local child is running,
+  pi-dev.nvim follows its bounded transcript artifact so newly completed
+  messages and tool activity appear even when compact parent progress omits the
+  full message stream. Missing, oversized, or malformed transcript artifacts
+  leave the last RPC-provided child summary intact.
 
   Nested subagents can be opened from inside a focused subagent buffer with the
   same command; depth increases in the title. Return one level with
@@ -535,6 +543,33 @@ Compatibility layers ~
   Other Pi plugins that use the generic Pi RPC extension UI protocol may work
   through generic native handling, but plugin-specific behavior is only
   available for the compatibility layers listed here.
+
+Subagent artifact watching ~
+  Local async runs follow a lifecycle `status.json` artifact for compact live
+  child summaries. Focused subagent buffers separately follow the child
+  transcript artifact when available. Both watchers have safety limits and
+  refresh timing defaults that may be overridden for larger artifacts or
+  different filesystem behavior: >lua
+
+    require('pi-dev').setup({
+      compat = {
+        subagent = {
+          status = {
+            max_bytes = 4 * 1024 * 1024,
+            poll_interval_ms = 500,
+            debounce_ms = 25,
+          },
+          transcript = {
+            max_bytes = 16 * 1024 * 1024,
+            poll_interval_ms = 750,
+            debounce_ms = 75,
+          },
+        },
+      },
+    })
+<
+  For both watcher tables, `max_bytes` and `poll_interval_ms` must be positive
+  numbers. `debounce_ms` must be non-negative.
 
 Permission prompts ~
   The permission compatibility layer is enabled by default. It detects
@@ -722,6 +757,22 @@ Compatibility layers:
                                       compatibility layers.
   compat.pi_permission_system.enable default: true
   compat.mcp_adapter.enable          default: true
+  compat.subagent.status.max_bytes   default: 2097152
+                                      Maximum local async lifecycle status
+                                      artifact size read for live summaries.
+  compat.subagent.status.poll_interval_ms default: 1000
+                                      Fallback status update detection interval.
+  compat.subagent.status.debounce_ms default: 50
+                                      Status file-event coalescing delay.
+  compat.subagent.transcript.max_bytes default: 8388608
+                                      Maximum child transcript artifact size
+                                      read into a focused subagent buffer.
+  compat.subagent.transcript.poll_interval_ms default: 500
+                                      Fallback interval for detecting child
+                                      transcript updates.
+  compat.subagent.transcript.debounce_ms default: 50
+                                      Delay for coalescing transcript file
+                                      events before reading.
 
 UI:
 
@@ -745,14 +796,17 @@ UI:
                                       Preferred status-separator toggle.
   ui.statusline.enable               default: true
                                       Legacy alias for the status separator.
+  ui.agent_tree.max_height           default: 8
+                                      Maximum agent-tree window height.
   ui.render.fold_tool_output_over    default: 20
                                       Tool details are always foldable; details
                                       auto-close only above this rendered-line
                                       threshold.
+  ui.render.fold_thinking_over       default: 8
+                                      Thinking detail auto-closes above this
+                                      rendered-line threshold.
   ui.render.show_timestamps          default: true
   ui.render.show_thinking            default: true
-                                      Thinking folds stay open up to 8 rendered
-                                      detail lines and auto-close above that.
   ui.render.show_tool_arguments      default: true
   ui.render.show_stderr              default: true
 

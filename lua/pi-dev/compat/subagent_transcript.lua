@@ -4,13 +4,13 @@ local config = require('pi-dev.config')
 
 local M = {}
 
-local watches = {}
+local active_watch
 
 local function watcher_options()
-  local defaults = config.defaults.compat.subagent.status
+  local defaults = config.defaults.compat.subagent.transcript
   local compat = config.options.compat
   local subagent = type(compat) == 'table' and compat.subagent or nil
-  local configured = type(subagent) == 'table' and subagent.status or nil
+  local configured = type(subagent) == 'table' and subagent.transcript or nil
   configured = type(configured) == 'table' and configured or {}
   local max_bytes = tonumber(configured.max_bytes) or defaults.max_bytes
   local poll_interval_ms = tonumber(configured.poll_interval_ms) or defaults.poll_interval_ms
@@ -38,59 +38,38 @@ local function stop_watch(watch)
     return
   end
   watch.stopped = true
-  if watch.debounce then
-    watch.debounce:stop()
+  for _, handle in ipairs({ watch.debounce, watch.poll, watch.event }) do
+    if handle then
+      pcall(handle.stop, handle)
+      close_handle(handle)
+    end
   end
-  if watch.poll then
-    watch.poll:stop()
-  end
-  if watch.event then
-    watch.event:stop()
-  end
-  close_handle(watch.debounce)
-  close_handle(watch.poll)
-  close_handle(watch.event)
-  if watches[watch.key] == watch then
-    watches[watch.key] = nil
+  if active_watch == watch then
+    active_watch = nil
   end
 end
 
-function M.stop(key)
-  stop_watch(watches[tostring(key or '')])
+function M.stop()
+  stop_watch(active_watch)
 end
 
-function M.stop_all()
-  local active = {}
-  for _, watch in pairs(watches) do
-    table.insert(active, watch)
+local function decode_records(data)
+  local records = {}
+  for line in tostring(data or ''):gmatch('[^\r\n]+') do
+    local ok, record = pcall(vim.json.decode, line)
+    if ok and type(record) == 'table' then
+      table.insert(records, record)
+    end
   end
-  for _, watch in ipairs(active) do
-    stop_watch(watch)
-  end
+  return records
 end
 
-local function terminal_state(status)
-  local state = type(status) == 'table' and tostring(status.state or status.status or ''):lower() or ''
-  return state == 'complete'
-    or state == 'completed'
-    or state == 'cancelled'
-    or state == 'canceled'
-    or state == 'error'
-    or state == 'failed'
-    or state == 'paused'
-    or state == 'stopped'
-    or state == 'detached'
-    or state == 'rejected'
-    or state == 'timed out'
-    or state == 'timeout'
-end
-
-local function read_status(watch)
+local function read_transcript(watch)
   if watch.stopped or watch.reading then
     return
   end
   watch.reading = true
-  vim.uv.fs_stat(watch.status_path, function(stat_error, stat)
+  vim.uv.fs_stat(watch.path, function(stat_error, stat)
     if watch.stopped then
       watch.reading = false
       return
@@ -99,7 +78,12 @@ local function read_status(watch)
       watch.reading = false
       return
     end
-    vim.uv.fs_open(watch.status_path, 'r', 438, function(open_error, fd)
+    local signature = table.concat({ tostring(stat.size), tostring(stat.mtime and stat.mtime.sec or 0), tostring(stat.mtime and stat.mtime.nsec or 0) }, ':')
+    if signature == watch.signature then
+      watch.reading = false
+      return
+    end
+    vim.uv.fs_open(watch.path, 'r', 438, function(open_error, fd)
       if open_error or not fd then
         watch.reading = false
         return
@@ -111,25 +95,14 @@ local function read_status(watch)
           return
         end
         vim.schedule(function()
-          if watch.stopped or watches[watch.key] ~= watch or not watch.is_current() then
+          if watch.stopped or active_watch ~= watch or not watch.is_current() then
             if not watch.stopped and not watch.is_current() then
               stop_watch(watch)
             end
             return
           end
-          local ok, status = pcall(vim.json.decode, data)
-          if not ok or type(status) ~= 'table' then
-            return
-          end
-          local signature = data
-          if signature == watch.signature then
-            return
-          end
           watch.signature = signature
-          watch.on_status(status)
-          if terminal_state(status) then
-            stop_watch(watch)
-          end
+          watch.on_records(decode_records(data))
         end)
       end)
     end)
@@ -140,40 +113,38 @@ local function schedule_read(watch)
   if watch.stopped then
     return
   end
-  if not watch.debounce then
-    watch.debounce = vim.uv.new_timer()
-  end
+  watch.debounce = watch.debounce or vim.uv.new_timer()
   watch.debounce:stop()
   watch.debounce:start(watch.debounce_ms, 0, function()
-    read_status(watch)
+    read_transcript(watch)
   end)
 end
 
 function M.watch(opts)
   opts = opts or {}
-  local key = tostring(opts.key or '')
-  local async_dir = type(opts.async_dir) == 'string' and opts.async_dir or nil
-  if key == '' or not async_dir or async_dir == '' or type(opts.on_status) ~= 'function' or type(opts.is_current) ~= 'function' then
+  local path = type(opts.path) == 'string' and opts.path or nil
+  if not path or path == '' or type(opts.on_records) ~= 'function' or type(opts.is_current) ~= 'function' then
     return false
   end
-  M.stop(key)
+  M.stop()
   local watcher = watcher_options()
   local watch = {
-    key = key,
-    status_path = async_dir .. '/status.json',
+    path = path,
+    on_records = opts.on_records,
     is_current = opts.is_current,
-    on_status = opts.on_status,
     max_bytes = watcher.max_bytes,
     poll_interval_ms = watcher.poll_interval_ms,
     debounce_ms = watcher.debounce_ms,
     stopped = false,
     reading = false,
   }
-  watches[key] = watch
+  active_watch = watch
   watch.event = vim.uv.new_fs_event()
+  local directory = vim.fn.fnamemodify(path, ':h')
+  local filename = vim.fn.fnamemodify(path, ':t')
   local event_ok = pcall(function()
-    watch.event:start(async_dir, {}, function(error, filename)
-      if not error and (filename == nil or tostring(filename) == 'status.json') then
+    watch.event:start(directory, {}, function(error, changed)
+      if not error and (changed == nil or tostring(changed) == filename) then
         schedule_read(watch)
       end
     end)
