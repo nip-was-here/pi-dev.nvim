@@ -80,8 +80,8 @@ bottom layout is also configurable.
   prompts, model/role/session controls, tree navigation, and waiting-branch
   navigation.
 - **Status separator**: non-focusable chrome between output and lower surfaces.
-  It shows compact state (`run`, `idle`, `wait`, `load`, etc.) plus metrics such
-  as cost, tokens, context, model, and current role.
+  It shows compact state (`run`, `sa_wait`, `idle`, `wait`, `load`, etc.) plus
+  metrics such as cost, tokens, context, model, and current role.
 
 Hiding the panel does not stop active RPC runtimes. Abort asks Pi to cancel the
 current operation while keeping the runtime attached when possible, and clears
@@ -163,12 +163,19 @@ state; inactive branch runtimes remain attached.
 
 The root chat header keeps root identity, runtime, status, role, model,
 thinking level, and session path. Subagent tool output stays compact in the
-parent chat, but each child block keeps its available identity, role/skills,
-task, status, model/thinking, progress, and live completed/current command
-summaries supplied by Pi. Tool durations update while the current command runs
-and remain beside completed commands when their start was observed. For scripted
-workflows, declared `runs.run`/`runs.all` children appear immediately from the
-tool request, before their first progress update. For local async runs,
+parent chat. A running `subagent_wait` call renders only its heading and `_run_`
+line while the status separator shows `sa_wait`; request/result details appear
+after the wait completes. Each child block keeps its available identity,
+role/skills, task, status, model/thinking, progress, and live completed/current
+command summaries supplied by Pi. Tool durations update while the current command runs
+and remain beside completed commands when their start was observed. Native Pi
+MCP, research, and content tools show request/result summary rows above folded
+raw JSON or script details, and unknown structured tools surface common fields
+such as target, action, server, path, URL, query, or nested args. The active tool
+target, search query, URL, or lookup context stays visible without opening the
+fold. For scripted workflows,
+declared `runs.run`/`runs.all` children appear immediately from the tool request,
+before their first progress update. For local async runs,
 pi-dev.nvim watches the returned lifecycle `status.json` and replaces those
 provisional commands with real step/tool status until the run becomes terminal.
 The focused child chat shows the full

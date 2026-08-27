@@ -140,14 +140,26 @@ Interaction surface ~
 Status separator ~
   Non-focusable chrome between output and lower surfaces. It shows compact
   operational state and metrics such as cost, tokens, context, model, and the
-  current role. State labels include `run`, `idle`, `wait`, `load`, `compact`,
-  `retry`, `queue`, `err`, and `off`. It is not the Neovim statusline.
+  current role. State labels include `run`, `sa_wait`, `idle`, `wait`, `load`,
+  `compact`, `retry`, `queue`, `err`, and `off`. It is not the Neovim
+  statusline.
 
 Rendering and folds ~
   The output buffer uses Markdown filetype by default. Tool, permission, and
   thinking details are rendered as foldable blocks. The headings stay visible;
   folds hide only detail bodies. Small details remain open, and longer details
   auto-close according to the configured thresholds.
+
+  Native Pi MCP, MCP scripting, web search, source-check, fetch-content, and
+  stored-content tools also render compact request/result summary rows above
+  their folded raw JSON or script sections. Unknown structured tools surface
+  common fields such as target, action, server, path, URL, query, response id,
+  and nested args. The visible rows keep the target tool, server, query, URL,
+  claim, response id, and concise result counts in the chat without requiring
+  the detail fold to be opened. A running `subagent_wait` call is intentionally
+  more compact: it shows only the tool heading and `_run_` line while the status
+  separator reports `sa_wait`; request/result details are rendered after the
+  wait completes.
 
 ===============================================================================
 6. Commands and keymaps                                      *pi-dev-commands*

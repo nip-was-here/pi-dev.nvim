@@ -376,6 +376,7 @@ local tool_events = require('pi-dev.renderer.tool_events')
 local tool_path = tools.path
 local tool_identity = require('pi-dev.tool_identity')
 local is_subagent_tool = subagent.is_tool
+local is_subagent_wait_tool = subagent.is_wait_tool or function() return false end
 local compact_tool_input = tools.compact_input
 local tool_args_to_lines = tools.args_to_lines
 local result_to_lines = tools.result_to_lines
@@ -2141,14 +2142,20 @@ render_tool_object = function(object, opts)
   end
 
   local lines = { '', title }
+  local running_subagent_wait = is_subagent_wait_tool(object.name) and object.status == 'Running'
   local display_status = tool_status_label(object.status)
   if display_status and display_status ~= '' then
     table.insert(lines, '_' .. display_status .. '_')
   end
-  if show_args and object.args ~= nil and (summary_truncated or not omit_input_detail) then
+  local visible_summary = not running_subagent_wait and tools.visible_summary_lines(object.name, object.args, object.partial_result or object.result) or nil
+  if visible_summary then
+    vim.list_extend(lines, visible_summary)
+    lines.__pi_detail_offset = #lines + 1
+  end
+  if not running_subagent_wait and show_args and object.args ~= nil and (summary_truncated or not omit_input_detail) then
     append_detail(lines, input_lines or tool_args_to_lines(object.name, object.args))
   end
-  if object.partial_result ~= nil then
+  if not running_subagent_wait and object.partial_result ~= nil then
     append_detail(lines, result_to_lines(object.partial_result, object.name, object.args, {
       lazy_subagent_details = opts.lazy_subagent_details == true,
       subagent_parent_summary_only = is_subagent_tool(object.name),
@@ -2180,7 +2187,7 @@ local function render_tool_object_by_id(id)
   local skip_running_subagent_fold = subagent_tool and object.status == 'Running' and object.partial_result ~= nil
   replace_tool_block(id, lines, {
     always_fold = subagent_tool and object.status ~= 'Running',
-    detail_offset = nil,
+    detail_offset = lines.__pi_detail_offset,
     suppress_auto_fold = running_bash or subagent_tool,
     child_folds = subagent_tool,
     skip_tool_fold = skip_running_subagent_fold,
@@ -2464,7 +2471,7 @@ local function update_tool_object(event, status)
         })
         replace_tool_block(parent_id, parent_lines, {
           always_fold = parent_subagent_tool and parent.status ~= 'Running',
-          detail_offset = nil,
+          detail_offset = parent_lines.__pi_detail_offset,
           suppress_auto_fold = parent_subagent_tool,
           child_folds = parent_subagent_tool,
           skip_tool_fold = parent_subagent_tool and parent.status == 'Running',

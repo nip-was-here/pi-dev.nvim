@@ -138,10 +138,21 @@ local function runtime_has_waiting_input(runtime)
   return runtime and (runtime.waiting_input == true or runtime_owns_waiting_input(runtime))
 end
 
+local function subagent_tool_module()
+  local ok, subagent = pcall(require, 'pi-dev.compat.subagent')
+  return ok and subagent or nil
+end
+
+local function event_is_subagent_wait(event)
+  local name = event and (event.toolName or event.tool_name or event.name)
+  local subagent = subagent_tool_module()
+  return subagent and subagent.is_wait_tool and subagent.is_wait_tool(name) or false
+end
+
 local function subagent_waiting_from_event(event)
   local name = event and (event.toolName or event.tool_name or event.name)
-  local ok, subagent = pcall(require, 'pi-dev.compat.subagent')
-  if not (ok and subagent.is_tool and subagent.is_tool(name)) then
+  local subagent = subagent_tool_module()
+  if not (subagent and subagent.is_tool and subagent.is_tool(name)) then
     return nil
   end
   local source = event.partialResult or event.partial_result or event.result
@@ -191,6 +202,7 @@ local short_status_labels = {
   ['running'] = 'run',
   ['idle'] = 'idle',
   ['waiting input'] = 'wait',
+  ['subagent wait'] = 'sa_wait',
   ['loading'] = 'load',
   ['compacting'] = 'compact',
   ['retrying'] = 'retry',
@@ -468,7 +480,11 @@ function M.handle_event(event)
     update_active_subagent_waiting_input(event)
     state.statusline.active = true
     state.statusline.waiting_input = runtime_owns_waiting_input()
-    state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
+    if event_is_subagent_wait(event) and not state.statusline.waiting_input then
+      state.statusline.status = 'subagent wait'
+    else
+      state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
+    end
   elseif event.type == 'tool_execution_end' then
     update_active_subagent_waiting_input(event)
     state.statusline.active = true
@@ -532,6 +548,7 @@ local service_statuses = {
   ['compacting'] = true,
   ['retrying'] = true,
   ['queue update'] = true,
+  ['subagent wait'] = true,
 }
 
 local function is_service_status(status)

@@ -1230,12 +1230,64 @@ function M.has_waiting_child(source)
   return scan(source)
 end
 
+function M.is_wait_tool(tool_name)
+  local lower = tostring(tool_name or ''):lower()
+  return lower == 'subagent_wait' or lower == 'subagent-wait'
+end
+
 function M.is_tool(tool_name)
   local lower = tostring(tool_name or ''):lower()
   return lower == 'agent'
     or lower == 'subagent'
     or lower:match('[_%-]agent$') ~= nil
     or lower:match('[_%-]subagent$') ~= nil
+end
+
+local function wait_target(args)
+  if type(args) ~= 'table' then
+    return 'active work'
+  end
+  if args.all == true then
+    return 'all active work'
+  end
+  local id = first_present_field(args, { 'id', 'runId', 'run_id', 'childId', 'child_id' })
+  if id then
+    return compact_header_text(id, 100)
+  end
+  if args.nonBlocking == true or args.non_blocking == true then
+    return 'subscription'
+  end
+  return 'active work'
+end
+
+function M.wait_summary(args)
+  return wait_target(args)
+end
+
+function M.wait_args_to_lines(args)
+  if type(args) ~= 'table' then
+    return fenced_lines('', vim.inspect(args))
+  end
+  local lines = { '#### Request' }
+  local function field(label, value)
+    if value ~= nil and value ~= vim.NIL and value ~= '' then
+      table.insert(lines, ('**%s:** %s'):format(label, tostring(value)))
+    end
+  end
+  field('Target', wait_target(args))
+  field('Id', first_present_field(args, { 'id', 'runId', 'run_id', 'childId', 'child_id' }))
+  if args.all ~= nil then
+    field('All', args.all == true and 'true' or tostring(args.all))
+  end
+  if args.nonBlocking ~= nil or args.non_blocking ~= nil then
+    field('Non-blocking', (args.nonBlocking == true or args.non_blocking == true) and 'true' or 'false')
+  end
+  field('Timeout', args.timeoutMs and (tostring(args.timeoutMs) .. ' ms') or args.timeout_ms and (tostring(args.timeout_ms) .. ' ms') or nil)
+  if #lines == 1 then
+    local ok, encoded = pcall(vim.json.encode, args)
+    return fenced_lines('json', ok and encoded or vim.inspect(args))
+  end
+  return lines
 end
 
 local workflow_run_descriptors
@@ -1790,6 +1842,54 @@ function M.wrapped_result_lines(text)
   local lines = { '#### Result' }
   append_wrapped_text(lines, text, { min_heading_level = 6, max_heading_level = 6 })
   return lines
+end
+
+function M.wait_result_to_lines(source, text, opts)
+  opts = opts or {}
+  if type(source) == 'table' then
+    local lines = M.result_to_lines(source, text, vim.tbl_extend('force', opts, { lazy_details = false }))
+    if lines then
+      return lines
+    end
+  end
+  if vim.trim(normalize_line_endings(text or '')) ~= '' then
+    return M.wrapped_result_lines(text)
+  end
+  return { '#### Result', '_No sub-agent wait result was returned._' }
+end
+
+function M.wait_visible_summary_lines(args, result)
+  if result == nil then
+    return nil
+  end
+  local lines = {}
+  if type(result) == 'table' then
+    local runs = result.results or result.children or result.tasks or result
+    if type(runs) == 'table' and #runs > 0 then
+      local completed = 0
+      local failed = 0
+      local waiting = 0
+      for _, item in ipairs(runs) do
+        local status = tostring(type(item) == 'table' and (item.status or item.state) or ''):lower()
+        if nested_terminal_statuses[status] then
+          if status == 'failed' or status == 'error' or status == 'failure' then
+            failed = failed + 1
+          else
+            completed = completed + 1
+          end
+        elseif status ~= '' then
+          waiting = waiting + 1
+        end
+      end
+      local parts = {}
+      if completed > 0 then table.insert(parts, tostring(completed) .. ' done') end
+      if failed > 0 then table.insert(parts, tostring(failed) .. ' failed') end
+      if waiting > 0 then table.insert(parts, tostring(waiting) .. ' pending') end
+      if #parts == 0 then table.insert(parts, tostring(#runs) .. ' results') end
+      table.insert(lines, 'result: ' .. inline_code(table.concat(parts, ', ')))
+    end
+  end
+  return #lines > 0 and lines or nil
 end
 
 function M.title_text(title, depth)
