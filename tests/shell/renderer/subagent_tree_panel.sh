@@ -8,7 +8,7 @@ source "$ROOT_DIR/tests/support/shell-test.sh"
 
 script="$(pidev_lua_file)"
 cat >"$script" <<'LUA'
-require('pi-dev').setup({ keymaps = { enable = false }, ui = { width = 90, input_height = 8 } })
+require('pi-dev').setup({ keymaps = { enable = false }, ui = { width = 90, input_height = 8, agent_tree = { max_height = 6 } } })
 local ui = require('pi-dev.ui')
 local renderer = require('pi-dev.renderer')
 local state = require('pi-dev.state')
@@ -176,7 +176,7 @@ renderer.handle_event({
 renderer.flush_pending_tool_renders()
 assert(valid_win(state.ui.subagent_tree_win), 'agent tree should appear for many subagents')
 local capped_tree_height = vim.api.nvim_win_get_height(state.ui.subagent_tree_win)
-assert(capped_tree_height == 8, 'many subagents should cap the tree at eight rows, got ' .. tostring(capped_tree_height))
+assert(capped_tree_height == 6, 'many subagents should use the configured six-row cap, got ' .. tostring(capped_tree_height))
 renderer.clear('after capped subagent tree')
 assert(not valid_win(state.ui.subagent_tree_win), 'capped subagent cleanup should close the agent tree')
 
@@ -196,7 +196,7 @@ renderer.flush_pending_tool_renders()
 assert(valid_win(state.ui.subagent_tree_win), 'agent tree should appear when running subagents exist')
 local two_subagent_tree_height = vim.api.nvim_win_get_height(state.ui.subagent_tree_win)
 assert(two_subagent_tree_height == 5, 'two running subagents should adapt to five rows, got ' .. tostring(two_subagent_tree_height))
-assert(two_subagent_tree_height <= 8, 'agent tree height must be capped at 8 rows')
+assert(two_subagent_tree_height <= 6, 'agent tree height must honor the configured cap')
 assert(vim.api.nvim_win_get_buf(state.ui.subagent_tree_win) == state.ui.subagent_tree_buf, 'agent tree window should show agent tree buffer')
 local tree = buf_text(state.ui.subagent_tree_buf)
 assert(tree:find('root%-agent %- ', 1, false), tree)

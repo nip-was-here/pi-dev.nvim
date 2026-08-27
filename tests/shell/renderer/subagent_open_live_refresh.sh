@@ -22,6 +22,7 @@ local function child_messages(final)
     {
       role = 'assistant',
       content = {
+        { type = 'thinking', thinking = 'I need to inspect the file before changing it.' },
         { type = 'text', text = 'I will inspect the synthetic project file.' },
         { type = 'toolCall', id = 'child-read', name = 'read', args = { path = './tmp/pi-dev-test/example-project/state.md' } },
       },
@@ -29,7 +30,32 @@ local function child_messages(final)
     {
       role = 'toolResult',
       toolCallId = 'child-read',
+      toolName = 'read',
       content = 'example tool result body',
+    },
+    {
+      role = 'assistant',
+      content = {
+        { type = 'toolCall', id = 'child-write', name = 'write', args = { path = './tmp/pi-dev-test/example-project/result.md', content = 'written child content' } },
+      },
+    },
+    {
+      role = 'toolResult',
+      toolCallId = 'child-write',
+      toolName = 'write',
+      content = '{"path":"./tmp/pi-dev-test/example-project/result.md","bytesWritten":21}',
+    },
+    {
+      role = 'assistant',
+      content = {
+        { type = 'toolCall', id = 'child-mcp', name = 'mcp', args = { tool = 'example_tool', server = 'example-server', args = { query = 'child detail' } } },
+      },
+    },
+    {
+      role = 'toolResult',
+      toolCallId = 'child-mcp',
+      toolName = 'mcp',
+      content = '{"ok":true,"data":{"items":["alpha","beta"]}}',
     },
   }
   if final then
@@ -141,10 +167,19 @@ local child_before = buf_text(state.ui.subagent_view.buf)
 assert(child_before:find('## User', 1, true), child_before)
 assert(child_before:find('inspect example project state', 1, true), child_before)
 assert(child_before:find('## Assistant', 1, true), child_before)
+assert(child_before:find('> Thinking', 1, true), child_before)
+assert(child_before:find('I need to inspect the file before changing it.', 1, true), child_before)
 assert(child_before:find('I will inspect the synthetic project file.', 1, true), child_before)
 assert(child_before:find('### Tool: read', 1, true), child_before)
 assert(child_before:find('./tmp/pi-dev-test/example-project/state.md', 1, true), child_before)
 assert(child_before:find('example tool result body', 1, true), child_before)
+assert(child_before:find('### Tool: write', 1, true), child_before)
+assert(child_before:find('```text\nwritten child content\n```', 1, true), child_before)
+assert(child_before:find('Successfully wrote ./tmp/pi-dev-test/example-project/result.md. 21 bytes.', 1, true), child_before)
+assert(child_before:find('### Tool: mcp', 1, true), child_before)
+assert(child_before:find('#### MCP request', 1, true), child_before)
+assert(child_before:find('"query":"child detail"', 1, true), child_before)
+assert(child_before:find('"alpha"', 1, true) and child_before:find('"beta"', 1, true), child_before)
 assert(child_before:find('### Tool: bash', 1, true), child_before)
 assert(child_before:find('echo running synthetic command', 1, true), child_before)
 assert(child_before:find('first running body', 1, true), child_before)

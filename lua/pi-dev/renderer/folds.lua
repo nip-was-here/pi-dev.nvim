@@ -181,7 +181,10 @@ local function display_line_count_exceeds(bufnr, start_line, end_line, win, thre
   return false
 end
 
-local thinking_auto_fold_over = 8
+local function thinking_auto_fold_over()
+  local configured = config.options.ui and config.options.ui.render and config.options.ui.render.fold_thinking_over
+  return math.max(0, tonumber(configured) or config.defaults.ui.render.fold_thinking_over)
+end
 
 function M.apply_thinking(block)
   local win = state.ui.output_win
@@ -213,7 +216,7 @@ function M.apply_thinking(block)
   state.render.thinking_fold_starts[start_line] = true
   local should_close = false
   if not auto_fold_suppressed() then
-    should_close = block.auto_fold_closed == true or display_line_count_exceeds(bufnr, start_line, end_line, win, thinking_auto_fold_over)
+    should_close = block.auto_fold_closed == true or display_line_count_exceeds(bufnr, start_line, end_line, win, thinking_auto_fold_over())
   end
   if should_close then
     block.auto_fold_closed = true

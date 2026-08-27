@@ -13,6 +13,9 @@ completion/context_parse.sh	0.5s
 completion/rpc_merge.sh	0.5s
 config/branches.sh	0.5s
 config/setup_idempotency.sh	0.6s
+config/subagent_status_options.sh	0.7s
+config/subagent_transcript_options.sh	0.7s
+config/ui_tuning_options.sh	0.5s
 contracts/ascii.sh	0.6s
 contracts/local_tmp.sh	3s
 contracts/lua_syntax.sh	0.5s
@@ -64,6 +67,7 @@ renderer/subagent_workflow_start_context.sh	0.6s
 renderer/subagent_buffer_navigation.sh	0.6s
 renderer/subagent_open_live_refresh.sh	0.6s
 renderer/subagent_status_text_tree.sh	0.6s
+renderer/subagent_transcript_detail.sh	0.8s
 renderer/subagent_wait_compact.sh	0.6s
 renderer/thinking_autofold_threshold.sh	0.5s
 renderer/thinking_whitespace_cleanup.sh	0.5s

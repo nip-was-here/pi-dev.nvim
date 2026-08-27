@@ -42,6 +42,18 @@ M.defaults = {
     mcp_adapter = {
       enable = true,
     },
+    subagent = {
+      status = {
+        max_bytes = 2 * 1024 * 1024,
+        poll_interval_ms = 1000,
+        debounce_ms = 50,
+      },
+      transcript = {
+        max_bytes = 8 * 1024 * 1024,
+        poll_interval_ms = 500,
+        debounce_ms = 50,
+      },
+    },
   },
 
   ui = {
@@ -59,8 +71,12 @@ M.defaults = {
     statusline = {
       enable = true,
     },
+    agent_tree = {
+      max_height = 8,
+    },
     render = {
       fold_tool_output_over = 20,
+      fold_thinking_over = 8,
       show_timestamps = true,
       show_thinking = true,
       show_tool_arguments = true,
@@ -98,6 +114,19 @@ M.defaults = {
 
 M.options = vim.deepcopy(M.defaults)
 
+local function validate_file_watcher(options, prefix)
+  options = type(options) == 'table' and options or {}
+  if options.max_bytes ~= nil and (type(options.max_bytes) ~= 'number' or options.max_bytes <= 0) then
+    error('pi-dev.nvim: ' .. prefix .. '.max_bytes must be a positive number')
+  end
+  if options.poll_interval_ms ~= nil and (type(options.poll_interval_ms) ~= 'number' or options.poll_interval_ms <= 0) then
+    error('pi-dev.nvim: ' .. prefix .. '.poll_interval_ms must be a positive number')
+  end
+  if options.debounce_ms ~= nil and (type(options.debounce_ms) ~= 'number' or options.debounce_ms < 0) then
+    error('pi-dev.nvim: ' .. prefix .. '.debounce_ms must be a non-negative number')
+  end
+end
+
 local function validate(opts)
   if opts.executable ~= nil then
     error('pi-dev.nvim: executable was renamed to exec.bin')
@@ -117,6 +146,19 @@ local function validate(opts)
   end
   if exec.args ~= nil and type(exec.args) ~= 'table' then
     error('pi-dev.nvim: exec.args must be a list')
+  end
+  local compat = type(opts.compat) == 'table' and opts.compat or {}
+  local subagent = type(compat.subagent) == 'table' and compat.subagent or {}
+  validate_file_watcher(subagent.status, 'compat.subagent.status')
+  validate_file_watcher(subagent.transcript, 'compat.subagent.transcript')
+  local ui = type(opts.ui) == 'table' and opts.ui or {}
+  local agent_tree = type(ui.agent_tree) == 'table' and ui.agent_tree or {}
+  if agent_tree.max_height ~= nil and (type(agent_tree.max_height) ~= 'number' or agent_tree.max_height <= 0) then
+    error('pi-dev.nvim: ui.agent_tree.max_height must be a positive number')
+  end
+  local render = type(ui.render) == 'table' and ui.render or {}
+  if render.fold_thinking_over ~= nil and (type(render.fold_thinking_over) ~= 'number' or render.fold_thinking_over < 0) then
+    error('pi-dev.nvim: ui.render.fold_thinking_over must be a non-negative number')
   end
 end
 
