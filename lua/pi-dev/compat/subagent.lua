@@ -1448,9 +1448,34 @@ end
 
 local workflow_run_descriptors
 
+local function resume_target(args)
+  if type(args) ~= 'table' then
+    return nil
+  end
+  local resume = args.resume
+  if type(resume) == 'table' then
+    return first_string_field(resume, { 'id', 'runId', 'run_id', 'childId', 'child_id', 'key', 'workflowRunId', 'workflow_run_id' })
+      or compact_header_text(vim.inspect(resume), 100)
+  end
+  if resume ~= nil and resume ~= vim.NIL and tostring(resume) ~= '' then
+    return compact_header_text(resume, 100)
+  end
+  return first_present_field(args, { 'id', 'runId', 'run_id', 'childId', 'child_id' })
+end
+
+local function is_resume_request(args)
+  if type(args) ~= 'table' then
+    return false
+  end
+  return args.resume ~= nil or tostring(args.action or '') == 'resume'
+end
+
 function M.summary(args)
   if type(args) ~= 'table' then
     return nil
+  end
+  if is_resume_request(args) then
+    return 'resume'
   end
   if args.action then
     return tostring(args.action)
@@ -1595,7 +1620,48 @@ workflow_run_descriptors = function(script)
 end
 
 local function request_children(args)
-  if type(args) ~= 'table' or type(args.workflowScript) ~= 'string' then
+  if type(args) ~= 'table' then
+    return {}
+  end
+
+  if is_resume_request(args) then
+    local target = resume_target(args) or 'resumed subagent'
+    local agent = first_string_field(args, { 'agent', 'name', 'role' }) or 'subagent'
+    local name = target
+    local item = {
+      name = name,
+      agent = agent,
+      role = first_string_field(args, { 'role' }) or agent,
+      model = args.model,
+      thinking = args.thinking,
+    }
+    local main_info = { '## Main info' }
+    append_agent_info(main_info, item, nil, 'running', agent, { name = name })
+    table.insert(main_info, '**Resume:** ' .. tostring(target))
+    if args.task and args.task ~= '' then
+      table.insert(main_info, '**Task:** ' .. compact_header_text(args.task, 160))
+    end
+    table.insert(main_info, '**Command:** resume')
+    return {
+      {
+        header = '##### ' .. tostring(name) .. ' - running',
+        key = 'resume-' .. tostring(target),
+        request_key = 'request-resume-' .. tostring(target),
+        label = name,
+        name = name,
+        title = name,
+        agent = agent,
+        role = item.role,
+        status = 'running',
+        active = true,
+        action = 'resume',
+        request_main_info = main_info,
+        lines = child_buffer_lines(name, main_info, { '_Sub-agent has not produced output yet._' }, 'running'),
+      },
+    }
+  end
+
+  if type(args.workflowScript) ~= 'string' then
     return {}
   end
   local descriptors = workflow_run_descriptors(args.workflowScript)
@@ -1640,6 +1706,7 @@ function M.args_to_lines(args)
   end
 
   field('Action', args.action)
+  field('Resume', resume_target(args))
   field('Agent', args.agent)
   field('Context', args.context)
   field('Timeout', args.timeoutMs and (tostring(args.timeoutMs) .. ' ms') or args.maxRuntimeMs and (tostring(args.maxRuntimeMs) .. ' ms') or nil)
