@@ -140,9 +140,9 @@ Interaction surface ~
 Status separator ~
   Non-focusable chrome between output and lower surfaces. It shows compact
   operational state and metrics such as cost, tokens, context, model, and the
-  current role. State labels include `run`, `sa_wait`, `idle`, `wait`, `load`,
-  `compact`, `retry`, `queue`, `err`, and `off`. It is not the Neovim
-  statusline.
+  current role. State labels include `run`, `sa_run`, `sa_wait`, `idle`,
+  `wait`, `load`, `compact`, `retry`, `queue`, `err`, and `off`. It is not the
+  Neovim statusline.
 
 Rendering and folds ~
   The output buffer uses Markdown filetype by default. Tool, permission, and
@@ -156,8 +156,10 @@ Rendering and folds ~
   common fields such as target, action, server, path, URL, query, response id,
   and nested args. The visible rows keep the target tool, server, query, URL,
   claim, response id, and concise result counts in the chat without requiring
-  the detail fold to be opened. A running `subagent_wait` call is intentionally
-  more compact: it shows only the tool heading and `_run_` line while the status
+  the detail fold to be opened. Active subagent tool work reports `sa_run` so it
+  does not collapse into generic `run` or idle-looking states while the parent is
+  delegated to children. A running `subagent_wait` call is intentionally more
+  compact: it shows only the tool heading and `_run_` line while the status
   separator reports `sa_wait`; request/result details are rendered after the
   wait completes.
 

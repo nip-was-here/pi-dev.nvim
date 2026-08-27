@@ -80,8 +80,8 @@ bottom layout is also configurable.
   prompts, model/role/session controls, tree navigation, and waiting-branch
   navigation.
 - **Status separator**: non-focusable chrome between output and lower surfaces.
-  It shows compact state (`run`, `sa_wait`, `idle`, `wait`, `load`, etc.) plus
-  metrics such as cost, tokens, context, model, and current role.
+  It shows compact state (`run`, `sa_run`, `sa_wait`, `idle`, `wait`, `load`,
+  etc.) plus metrics such as cost, tokens, context, model, and current role.
 
 Hiding the panel does not stop active RPC runtimes. Abort asks Pi to cancel the
 current operation while keeping the runtime attached when possible, and clears
@@ -163,7 +163,8 @@ state; inactive branch runtimes remain attached.
 
 The root chat header keeps root identity, runtime, status, role, model,
 thinking level, and session path. Subagent tool output stays compact in the
-parent chat. A running `subagent_wait` call renders only its heading and `_run_`
+parent chat. While subagent tool work is active the status separator shows
+`sa_run`; a running `subagent_wait` call renders only its heading and `_run_`
 line while the status separator shows `sa_wait`; request/result details appear
 after the wait completes. Each child block keeps its available identity,
 role/skills, task, status, model/thinking, progress, and live completed/current

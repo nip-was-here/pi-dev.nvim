@@ -117,6 +117,7 @@ statusline/no_colons.sh	0.5s
 statusline/rpc_step_refresh.sh	0.5s
 statusline/run_counter_service_statuses.sh	0.5s
 statusline/state_spec.sh	0.5s
+statusline/subagent_run_status.sh	0.5s
 statusline/unknown_metrics_placeholder.sh	0.6s
 tree/assistant_navigation.sh	1.0s
 tree/auto_fold_leaf_branches.sh	0.6s
