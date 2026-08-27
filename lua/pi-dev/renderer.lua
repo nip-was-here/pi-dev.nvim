@@ -2405,6 +2405,20 @@ local function update_tool_object(event, status)
   local id, object, created = tool_events.object_from_event(event)
   state.render.last_tool_id = id
   object.status = status
+  if status == 'Running' and event.type == 'tool_execution_start' then
+    object.result = nil
+    object.partial_result = nil
+    object.async_subagent_start_result = nil
+    object.async_subagent_receipt = nil
+    object.async_subagent_runtime_key = nil
+    object.finished_at_ms = nil
+    object.finished_at_ms_reliable = nil
+    object.duration_ms = nil
+    local block = state.render.tool_blocks and state.render.tool_blocks[id]
+    if block then
+      block.subagent_live_tool_timings = nil
+    end
+  end
 
   local start_ms = event_timestamp_milliseconds(event, { 'startedAt', 'started_at', 'startTime', 'start_time' }, status == 'Running')
   local end_ms = event_timestamp_milliseconds(event, { 'endedAt', 'ended_at', 'finishedAt', 'finished_at', 'completedAt', 'completed_at', 'endTime', 'end_time' }, true)
