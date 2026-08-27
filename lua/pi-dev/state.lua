@@ -80,6 +80,7 @@ local function runtime_defaults(key)
     active = false,
     waiting_input = false,
     subagent_waiting_input = false,
+    subagent_running = false,
     loading = false,
     loading_lock = false,
     error = nil,
@@ -177,6 +178,7 @@ function M.set_runtime_loading(runtime, loading, opts)
     runtime.loading_lock = opts.lock_input ~= false
     runtime.status = 'loading'
     runtime.waiting_input = false
+    runtime.subagent_running = false
     runtime.error = nil
   else
     runtime.loading_lock = false
@@ -283,6 +285,7 @@ function M.reset_rpc_runtime(runtime, remove)
   runtime.active = false
   runtime.waiting_input = false
   runtime.subagent_waiting_input = false
+  runtime.subagent_running = false
   runtime.loading = false
   runtime.loading_lock = false
   runtime.status = 'not connected'

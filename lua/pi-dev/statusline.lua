@@ -138,15 +138,30 @@ local function runtime_has_waiting_input(runtime)
   return runtime and (runtime.waiting_input == true or runtime_owns_waiting_input(runtime))
 end
 
+local function runtime_has_subagent_running(runtime)
+  runtime = runtime or state.active_rpc_runtime()
+  return runtime and runtime.subagent_running == true
+end
+
 local function subagent_tool_module()
   local ok, subagent = pcall(require, 'pi-dev.compat.subagent')
   return ok and subagent or nil
 end
 
+local function event_tool_name(event)
+  return event and (event.toolName or event.tool_name or event.name)
+end
+
 local function event_is_subagent_wait(event)
-  local name = event and (event.toolName or event.tool_name or event.name)
+  local name = event_tool_name(event)
   local subagent = subagent_tool_module()
   return subagent and subagent.is_wait_tool and subagent.is_wait_tool(name) or false
+end
+
+local function event_is_subagent_run(event)
+  local name = event_tool_name(event)
+  local subagent = subagent_tool_module()
+  return subagent and subagent.is_tool and subagent.is_tool(name) or false
 end
 
 local function subagent_waiting_from_event(event)
@@ -175,6 +190,9 @@ local function baseline_status()
   if state.statusline.waiting_input or runtime_has_waiting_input() then
     return 'waiting input'
   end
+  if runtime_has_subagent_running() then
+    return 'subagent run'
+  end
   if state.statusline.active then
     return 'running'
   end
@@ -202,6 +220,7 @@ local short_status_labels = {
   ['running'] = 'run',
   ['idle'] = 'idle',
   ['waiting input'] = 'wait',
+  ['subagent run'] = 'sa_run',
   ['subagent wait'] = 'sa_wait',
   ['loading'] = 'load',
   ['compacting'] = 'compact',
@@ -222,6 +241,9 @@ end
 local function runtime_status()
   if state.statusline.waiting_input or runtime_has_waiting_input() then
     return 'waiting input'
+  end
+  if runtime_has_subagent_running() then
+    return 'subagent run'
   end
   if state.statusline.active then
     local status = statusline_display_status(state.statusline.status)
@@ -272,6 +294,7 @@ function M.set_error(error_message, opts)
   local runtime = state.active_rpc_runtime()
   runtime.active = false
   runtime.waiting_input = false
+  runtime.subagent_running = false
   runtime.loading = false
   runtime.status = 'error'
   runtime.error = error_message and tostring(error_message) or nil
@@ -367,10 +390,10 @@ function M.update_from_state(data, opts)
     runtime.waiting_input = runtime_has_waiting_input(runtime) or (active and runtime.compaction_previous_waiting_input == true) or false
     runtime.compaction_previous_active = nil
     runtime.compaction_previous_waiting_input = nil
-    runtime.status = runtime.waiting_input and 'waiting input' or (runtime.active and 'running' or (state.is_job_running(runtime) and 'idle' or 'not connected'))
+    runtime.status = runtime.waiting_input and 'waiting input' or (runtime_has_subagent_running(runtime) and 'subagent run' or (runtime.active and 'running' or (state.is_job_running(runtime) and 'idle' or 'not connected')))
   elseif data.isStreaming ~= nil or data.model ~= nil then
     runtime.waiting_input = runtime_has_waiting_input(runtime)
-    runtime.status = runtime.waiting_input and 'waiting input' or (runtime.active and 'running' or (state.is_job_running(runtime) and 'idle' or 'not connected'))
+    runtime.status = runtime.waiting_input and 'waiting input' or (runtime_has_subagent_running(runtime) and 'subagent run' or (runtime.active and 'running' or (state.is_job_running(runtime) and 'idle' or 'not connected')))
   end
   sync_runtime_status(runtime)
 end
@@ -425,12 +448,14 @@ function M.handle_event(event)
     state.statusline.status = 'not connected'
   elseif event.type == 'agent_start' then
     state.active_rpc_runtime().subagent_waiting_input = false
+    state.active_rpc_runtime().subagent_running = false
     state.statusline.error = nil
     state.statusline.loading = false
     state.statusline.active = true
     state.statusline.waiting_input = runtime_owns_waiting_input()
     state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
   elseif event.type == 'agent_end' then
+    state.active_rpc_runtime().subagent_running = false
     state.statusline.active = false
     state.statusline.waiting_input = runtime_owns_waiting_input()
     state.statusline.compaction_previous_active = nil
@@ -467,6 +492,9 @@ function M.handle_event(event)
     end
     if role == 'user' or role == 'assistant' then
       state.active_rpc_runtime().subagent_waiting_input = false
+      if role == 'user' then
+        state.active_rpc_runtime().subagent_running = false
+      end
       state.statusline.loading = false
       state.statusline.active = true
       state.statusline.waiting_input = runtime_owns_waiting_input()
@@ -475,17 +503,26 @@ function M.handle_event(event)
   elseif event.type == 'message_update' then
     state.statusline.active = true
     state.statusline.waiting_input = runtime_owns_waiting_input()
-    state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
+    state.statusline.status = baseline_status()
   elseif event.type == 'tool_execution_start' or event.type == 'tool_execution_update' then
+    local subagent_run = event_is_subagent_run(event)
+    if subagent_run then
+      state.active_rpc_runtime().subagent_running = true
+    end
     update_active_subagent_waiting_input(event)
     state.statusline.active = true
     state.statusline.waiting_input = runtime_owns_waiting_input()
     if event_is_subagent_wait(event) and not state.statusline.waiting_input then
       state.statusline.status = 'subagent wait'
+    elseif event_is_subagent_run(event) and not state.statusline.waiting_input then
+      state.statusline.status = 'subagent run'
     else
       state.statusline.status = state.statusline.waiting_input and 'waiting input' or 'running'
     end
   elseif event.type == 'tool_execution_end' then
+    if event_is_subagent_run(event) then
+      state.active_rpc_runtime().subagent_running = false
+    end
     update_active_subagent_waiting_input(event)
     state.statusline.active = true
     state.statusline.waiting_input = runtime_owns_waiting_input()
@@ -526,6 +563,9 @@ local function runtime_badge_status(runtime)
   if runtime_has_waiting_input(runtime) then
     return 'waiting input'
   end
+  if runtime_has_subagent_running(runtime) then
+    return 'subagent run'
+  end
   if runtime.active then
     local status = statusline_display_status(runtime.status)
     if not is_generic_status(status) and status ~= 'waiting input' then
@@ -548,6 +588,7 @@ local service_statuses = {
   ['compacting'] = true,
   ['retrying'] = true,
   ['queue update'] = true,
+  ['subagent run'] = true,
   ['subagent wait'] = true,
 }
 
