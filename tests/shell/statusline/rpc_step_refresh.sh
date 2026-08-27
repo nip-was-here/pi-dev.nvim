@@ -71,6 +71,25 @@ text = push(background, { type = 'tool_execution_start', toolName = 'read', tool
 assert(text:find('run 2/2', 1, true), text)
 assert(text:find('tool read', 1, true) == nil, text)
 
+text = push(background, {
+  type = 'tool_execution_update',
+  toolName = 'subagent',
+  toolCallId = 'sub-bg',
+  partialResult = {
+    details = {
+      results = {
+        {
+          agent = 'reviewer',
+          progress = { status = 'paused', task = 'Await supervisor input' },
+        },
+      },
+    },
+  },
+})
+assert(text:find('run 1/2', 1, true), text)
+assert(text:find('wait 1', 1, true), text)
+assert(runtime_status.badge(background) == '[wait]', 'tree badge should reflect waiting subagent in non-active Pi RPC runtime')
+
 text = push(background, { type = 'extension_ui_request', id = 'perm-bg', method = 'select', options = { 'Yes', 'No' } })
 assert(text:find('run 1/2', 1, true), text)
 assert(text:find('wait 1', 1, true), text)
@@ -87,6 +106,7 @@ statusline.update_from_state({ model = { provider = 'active', id = 'model' }, th
 statusline.update_from_stats({ cost = 0.01, tokens = { total = 111 }, contextUsage = { percent = 10 } }, { runtime = active })
 background.pending_extension_ui_request = nil
 background.waiting_input = false
+background.subagent_waiting_input = false
 statusline.update_from_state({ model = { provider = 'background', id = 'model' }, thinkingLevel = 'high', isStreaming = true }, { runtime = background })
 statusline.update_from_stats({ cost = 0.25, tokens = { total = 222 }, contextUsage = { percent = 20 } }, { runtime = background })
 text = statusline.render_for_width(160)

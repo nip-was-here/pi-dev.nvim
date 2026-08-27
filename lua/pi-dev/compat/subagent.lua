@@ -1174,6 +1174,62 @@ function M.async_status_terminal(status)
     or value == 'timeout'
 end
 
+local subagent_wait_statuses = {
+  ['awaiting input'] = true,
+  ['need decision'] = true,
+  ['needs attention'] = true,
+  ['needs decision'] = true,
+  ['paused'] = true,
+  ['waiting'] = true,
+  ['waiting input'] = true,
+}
+
+local function normalized_status(value)
+  value = tostring(value or ''):lower():gsub('_', ' '):gsub('%s+', ' ')
+  return vim.trim(value)
+end
+
+local function value_marks_waiting(value)
+  local status = normalized_status(value)
+  return subagent_wait_statuses[status] == true
+end
+
+function M.has_waiting_child(source)
+  local seen = {}
+  local function scan(value)
+    if type(value) ~= 'table' then
+      return false
+    end
+    if seen[value] then
+      return false
+    end
+    seen[value] = true
+
+    if value.waitingInput == true or value.waiting_input == true or value.needsAttention == true or value.needs_attention == true then
+      return true
+    end
+    for _, field in ipairs({ 'status', 'state', 'activityState', 'activity_state', 'controlState', 'control_state' }) do
+      if value[field] ~= nil and value_marks_waiting(value[field]) then
+        return true
+      end
+    end
+
+    for _, field in ipairs({ 'progress', 'results', 'children', 'steps', 'tasks', 'details' }) do
+      local child = value[field]
+      if type(child) == 'table' and scan(child) then
+        return true
+      end
+    end
+    for _, child in pairs(value) do
+      if type(child) == 'table' and scan(child) then
+        return true
+      end
+    end
+    return false
+  end
+  return scan(source)
+end
+
 function M.is_tool(tool_name)
   local lower = tostring(tool_name or ''):lower()
   return lower == 'agent'
